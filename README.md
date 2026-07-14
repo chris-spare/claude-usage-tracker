@@ -4,6 +4,8 @@ A macOS menu-bar app that charts your Claude Code usage as three donut circles �
 the **5-hour** and **7-day** rate-limit windows plus **month-to-date spend** —
 each labeled in its center (`5h`, `7d`, `$`).
 
+![Claude Usage Tracker menu](docs/screenshot.png)
+
 Every donut overlays two clockwise arcs from 12 o'clock — elapsed *time* and
 *usage* — colored by how they compare:
 

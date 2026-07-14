@@ -1,17 +1,14 @@
 import AppKit
 
-/// Top-level wiring: owns the menu bar, the usage poller, and a redraw timer that
-/// keeps the time arcs and countdowns moving between fetches.
+/// Top-level wiring: owns the menu bar and the usage poller. The tray shows the
+/// last fetch as a fixed snapshot, so it only repaints when new data arrives —
+/// no periodic redraw timer (which would drift the time arc misleadingly).
 @MainActor
 final class AppCoordinator: NSObject, NSApplicationDelegate {
     private let menuBar = MenuBarController()
     private let store = UsageStore()       // persisted last-fetch time + last data
     private let poller: UsagePoller
     private let history = UsageHistory()   // rolling 2h capture for future sparklines
-    private var redrawTimer: Timer?
-
-    /// Repaint the tray this often so time arcs advance without a new fetch.
-    private static let redrawInterval: TimeInterval = 15
 
     /// Set to `true` to develop the UI against animated fake data with no network
     /// or Keychain access; `false` fetches live usage from Anthropic.
@@ -52,9 +49,5 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         }
         poller.onError = { [weak self] message in self?.menuBar.setError(message) }
         poller.start()
-
-        redrawTimer = Timer.scheduledTimer(withTimeInterval: Self.redrawInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.menuBar.redraw() }
-        }
     }
 }

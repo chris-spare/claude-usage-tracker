@@ -136,14 +136,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         redraw()
     }
 
-    /// Repaint the tray icon from cached data at the current time (called on a
-    /// timer so time arcs/countdowns move without a new fetch).
+    /// Repaint the tray icon. The pies render the **snapshot as of the last fetch**
+    /// (not the live clock), so the time arc — and thus the time-vs-usage
+    /// comparison — isn't misrepresented by up to a fetch interval of drift.
     func redraw() {
         guard let button = statusItem.button else { return }
+        let snapshot = lastUpdated ?? Date()
         button.image = PieChart.trayImage(fiveHour: data?.fiveHour, sevenDay: data?.sevenDay,
                                           extraUsage: data?.extraUsage,
                                           customLimitCents: Settings.customLimitCents,
-                                          showError: lastError != nil)
+                                          showError: lastError != nil, now: snapshot)
         button.image?.accessibilityDescription = lastError == nil
             ? "Claude usage: 5-hour, 7-day, and month-to-date spend"
             : "Claude usage (last fetch failed): \(lastError ?? "")"
@@ -153,15 +155,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         let now = Date()
+        let snapshot = lastUpdated ?? now   // usage/projection reflect the last fetch
         let hasError = lastError != nil
         for item in [errorTitle, errorMessage] { item.isHidden = !hasError }
         errorSeparator.isHidden = !hasError
         errorMessage.title = lastError ?? ""
 
         applyBucket(bucket: data?.fiveHour, window: UsageWindow.fiveHour,
-                    usageItem: fiveHourUsage, resetItem: fiveHourReset, now: now)
+                    usageItem: fiveHourUsage, resetItem: fiveHourReset, now: now, snapshot: snapshot)
         applyBucket(bucket: data?.sevenDay, window: UsageWindow.sevenDay,
-                    usageItem: sevenDayUsage, resetItem: sevenDayReset, now: now)
+                    usageItem: sevenDayUsage, resetItem: sevenDayReset, now: now, snapshot: snapshot)
         applySpend(data?.extraUsage)
 
         // Sparklines + recent-peak lines from the rolling history (each hidden
@@ -206,8 +209,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// `snapshot` is the last-fetch time (usage % + projection are of that moment);
+    /// `now` is the live clock (only the reset countdown ticks against it).
     private func applyBucket(bucket: UsageBucket?, window: TimeInterval,
-                             usageItem: NSMenuItem, resetItem: NSMenuItem, now: Date) {
+                             usageItem: NSMenuItem, resetItem: NSMenuItem, now: Date, snapshot: Date) {
         guard let bucket else {
             usageItem.title = "No data yet"
             resetItem.isHidden = true
@@ -216,14 +221,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         resetItem.isHidden = false
         let pct = Int(bucket.utilization.rounded())
         if let proj = UsageMath.projectUsage(utilization: bucket.utilization,
-                                             resetsAt: bucket.resetsAt, window: window, now: now) {
+                                             resetsAt: bucket.resetsAt, window: window, now: snapshot) {
             usageItem.title = "\(pct)% used  ·  projected \(Int(proj.rounded()))%"
         } else {
             usageItem.title = "\(pct)% used"
         }
-        let reset = UsageMath.formatResetTime(bucket.resetsAt, now: now)
-        let delta = UsageMath.formatDelta(to: bucket.resetsAt, now: now)
-        resetItem.title = "Resets \(reset)  ·  in \(delta)"
+        // Genuine wall-clock countdown; once the window is past due (before the next
+        // fetch brings a fresh window) say "Resets soon" rather than a negative time.
+        if bucket.resetsAt.timeIntervalSince(now) <= 0 {
+            resetItem.title = "Resets soon"
+        } else {
+            let reset = UsageMath.formatResetTime(bucket.resetsAt, now: now)
+            let delta = UsageMath.formatDelta(to: bucket.resetsAt, now: now)
+            resetItem.title = "Resets \(reset)  ·  in \(delta)"
+        }
     }
 
     /// Populate (or hide) the month-to-date spend section, honoring a custom limit.

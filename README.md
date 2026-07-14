@@ -1,4 +1,4 @@
-# Claude Usage Tray
+# Claude Usage Tracker
 
 A macOS menu-bar app that charts your Claude Code usage as three donut circles —
 the **5-hour** and **7-day** rate-limit windows plus **month-to-date spend** —
@@ -17,10 +17,12 @@ Every donut overlays two clockwise arcs from 12 o'clock — elapsed *time* and
 For the two windows, "time" is how far into the window you are; for spend it's how
 far through the calendar month, and "usage" is dollars against your limit.
 
-Click the icon for exact numbers: current % + projected end-of-window % + reset
-time per window, dollars spent + limit, a 2-hour sparkline under each section, and
-when it last refreshed. If the last fetch failed, a ⚠︎ warning glyph joins the
-circles and the error is shown at the top of the menu.
+Click the icon for exact numbers per section — current % + projected
+end-of-window % + reset time for the windows, dollars spent + limit for spend —
+plus a 2-hour **usage-rate sparkline** (per-fetch deltas, so it spikes during
+bursts and rests at zero when idle) and a **recent-peak** readout, and when it
+last refreshed. If the last fetch failed, a ⚠︎ warning glyph joins the circles and
+the error is shown at the top of the menu.
 
 ### Custom spend limit
 
@@ -42,12 +44,12 @@ Tools: `xcode-select --install`).
 open "build/Claude Usage.app"
 ```
 
-The pie charts appear in your menu bar. The first time it fetches, macOS may ask
+The donuts appear in your menu bar. The first time it fetches, macOS may ask
 permission to read the **“Claude Code-credentials”** Keychain item — click
 **Always Allow**. That's the OAuth token it uses to read your usage; the app only
 reads it, and only talks to `api.anthropic.com`.
 
-To stop it: click the icon → **Quit Claude Usage**.
+To stop it: click the icon → **Quit**.
 
 ### Open at Login
 
@@ -57,12 +59,14 @@ it runs, so it comes back after a reboot. You can toggle it any time from the me
 
 ## Notes
 
-- Usage is fetched at most **once every 5 minutes** (the tray still repaints every
-  15 s so the time arcs and countdowns keep moving between fetches). The last fetch
-  time and reading are cached to disk, so restarting the app doesn't trigger an
-  extra API call within that window — it reuses the cache and waits out the rest of
-  the cooldown.
+- Usage is fetched at most **once every 5 minutes**. The last fetch time and
+  reading are cached to disk, so restarting the app doesn't trigger an extra API
+  call within that window — it reuses the cache and waits out the rest of the
+  cooldown. The donuts show that last snapshot: the time arc does **not** creep
+  between fetches (which would misrepresent usage-vs-time). Only the menu's reset
+  countdown and "updated … ago" text advance with the clock, refreshed each time
+  you open the menu.
 - Requires a **Claude.ai subscription** account (Pro/Team/etc.). API-key-only
   accounts have no usage endpoint, so the app will note that and stop polling.
 - Runtime log: `~/Library/Logs/ClaudeUsageTray.log`.
-- Tests: `swift test`. Pie preview: `swift run ClaudeUsageTray --render /tmp/pies.png`.
+- Tests: `swift test`. Preview render: `swift run ClaudeUsageTray --render /tmp/preview.png`.

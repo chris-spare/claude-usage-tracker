@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Outbound HTTPS to the Anthropic OAuth usage endpoint (used once we switch
+         off mock data). Not sandboxed, so this is only meaningful under a
+         hardened runtime; harmless otherwise. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>

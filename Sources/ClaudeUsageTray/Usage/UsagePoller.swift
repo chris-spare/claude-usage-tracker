@@ -75,19 +75,31 @@ final class UsagePoller {
                 Log.log("usage: fetched (5h=\(f), 7d=\(s))")
                 self?.onData?(data)
                 self?.scheduleAfterAttempt()
-            } catch is ClaudeUsageFetcher.NoOAuthCredentialsError {
-                Log.log("usage: no OAuth credentials (API-key account) — stopping poller")
-                self?.onError?("No Claude subscription credentials in Keychain")
-                self?.stop()   // permanent; do not reschedule
-            } catch let e as ClaudeUsageFetcher.UsageAPIError {
-                Log.log("usage: API error \(e.status): \(e.body)")
-                self?.onError?("Usage API returned \(e.status)")
-                self?.scheduleAfterAttempt()
             } catch {
-                Log.log("usage: fetch failed: \(error)")
-                self?.onError?("Fetch failed — will retry")
-                self?.scheduleAfterAttempt()
+                let (message, permanent) = UsagePoller.describe(error)
+                Log.log("usage: fetch failed (\(permanent ? "permanent" : "will retry")): \(error)")
+                self?.onError?(message)
+                if permanent { self?.stop() } else { self?.scheduleAfterAttempt() }
             }
+        }
+    }
+
+    /// Turn a fetch error into a specific, user-facing message and whether it's
+    /// permanent (stop polling) or transient (retry next cooldown).
+    private static func describe(_ error: Error) -> (message: String, permanent: Bool) {
+        switch error {
+        case is ClaudeUsageFetcher.NoOAuthCredentialsError:
+            return ("No Claude subscription credentials in Keychain (API-key account?)", true)
+        case let e as ClaudeUsageFetcher.KeychainError:
+            return ("Keychain read failed: \(e.detail)", false)
+        case let e as ClaudeUsageFetcher.UsageAPIError:
+            return (e.userMessage, false)
+        case let e as URLError:
+            return ("Network error: \(e.localizedDescription)", false)
+        case is DecodingError:
+            return ("Couldn't parse the usage response", false)
+        default:
+            return ("Fetch failed: \(error.localizedDescription)", false)
         }
     }
 

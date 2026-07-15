@@ -47,8 +47,10 @@ enum PieChart {
     static func trayImage(fiveHour: UsageBucket?, sevenDay: UsageBucket?,
                           extraUsage: ExtraUsage? = nil, customLimitCents: Double? = nil,
                           showError: Bool = false, now: Date = Date()) -> NSImage {
+        // Spend donut only when there's a limit to measure against (custom or API).
+        let showSpend = UsageMath.showsSpendCircle(extraUsage, customLimitCents: customLimitCents)
         var slots = 2
-        if extraUsage != nil { slots += 1 }
+        if showSpend { slots += 1 }
         if showError { slots += 1 }
         let size = size(circles: slots)
         let image = NSImage(size: size, flipped: false) { _ in
@@ -59,7 +61,7 @@ enum PieChart {
             drawPie(bucket: fiveHour, window: UsageWindow.fiveHour, in: rect(0), now: now, label: "5h")
             drawPie(bucket: sevenDay, window: UsageWindow.sevenDay, in: rect(1), now: now, label: "7d")
             var next = 2
-            if let extraUsage {
+            if showSpend, let extraUsage {
                 drawPie(time: UsageMath.monthTimeFraction(now: now),
                         usage: UsageMath.spendFraction(extraUsage, customLimitCents: customLimitCents),
                         in: rect(next), label: "$")

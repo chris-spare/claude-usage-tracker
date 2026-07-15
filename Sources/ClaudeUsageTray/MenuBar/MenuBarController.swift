@@ -218,7 +218,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             resetItem.isHidden = true
             return
         }
-        resetItem.isHidden = false
         let pct = Int(bucket.utilization.rounded())
         if let proj = UsageMath.projectUsage(utilization: bucket.utilization,
                                              resetsAt: bucket.resetsAt, window: window, now: snapshot) {
@@ -226,13 +225,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         } else {
             usageItem.title = "\(pct)% used"
         }
+        // An idle window (no reset scheduled yet) has no countdown to show.
+        guard let resetsAt = bucket.resetsAt else {
+            resetItem.isHidden = false
+            resetItem.title = "Not started — resets once used"
+            return
+        }
+        resetItem.isHidden = false
         // Genuine wall-clock countdown; once the window is past due (before the next
         // fetch brings a fresh window) say "Resets soon" rather than a negative time.
-        if bucket.resetsAt.timeIntervalSince(now) <= 0 {
+        if resetsAt.timeIntervalSince(now) <= 0 {
             resetItem.title = "Resets soon"
         } else {
-            let reset = UsageMath.formatResetTime(bucket.resetsAt, now: now)
-            let delta = UsageMath.formatDelta(to: bucket.resetsAt, now: now)
+            let reset = UsageMath.formatResetTime(resetsAt, now: now)
+            let delta = UsageMath.formatDelta(to: resetsAt, now: now)
             resetItem.title = "Resets \(reset)  ·  in \(delta)"
         }
     }

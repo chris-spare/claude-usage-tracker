@@ -1,13 +1,9 @@
 import Foundation
 
-/// Real usage provider. NOT wired up yet — the app runs on `MockUsageProvider`
-/// until the UI is signed off. Kept complete and in place so the switch in
-/// AppCoordinator is a one-liner.
-///
-/// Mirrors SpaceTerm's `claude-usage.ts` exactly:
+/// The live usage provider. Mirrors SpaceTerm's `claude-usage.ts`:
 ///   • read the OAuth token from the login Keychain item "Claude Code-credentials"
-///     (account = $USER) by shelling out to `security` (same as SpaceTerm — avoids
-///     Keychain-entitlement fuss; the item's ACL trusts /usr/bin/security);
+///     (account = $USER) by shelling out to `security` (avoids Keychain-entitlement
+///     fuss; the item's ACL trusts /usr/bin/security);
 ///   • GET https://api.anthropic.com/api/oauth/usage with the OAuth bearer token.
 ///
 /// Cadence: the caller must not fetch more than once per 5 minutes.
@@ -20,10 +16,34 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
     private static let userAgent = "claude-code/2.1.47"
     private static let timeout: TimeInterval = 5
 
-    /// The account has an API key rather than a Claude.ai subscription — there are
-    /// no OAuth credentials to read, so polling should stop permanently.
+    /// No OAuth credentials exist (item not found) — an API-key account rather than
+    /// a Claude.ai subscription. Polling should stop permanently.
     struct NoOAuthCredentialsError: Error {}
-    struct UsageAPIError: Error { let status: Int; let body: String }
+    /// `security` failed for a transient reason (keychain locked, prompt dismissed,
+    /// etc.) — worth retrying. `detail` carries the tool's stderr.
+    struct KeychainError: Error { let detail: String }
+    /// The usage endpoint returned a non-2xx status.
+    struct UsageAPIError: Error {
+        let status: Int
+        let body: String
+
+        /// A concise, user-facing line: prefers the API's `error.message`, else a
+        /// trimmed one-line snippet of the body.
+        var userMessage: String {
+            let snippet = Self.snippet(from: body)
+            return snippet.isEmpty ? "Usage API returned \(status)" : "Usage API \(status): \(snippet)"
+        }
+
+        private static func snippet(from body: String) -> String {
+            if let data = body.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = obj["error"] as? [String: Any],
+               let message = err["message"] as? String { return message }
+            let oneLine = body.replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return String(oneLine.prefix(120))
+        }
+    }
 
     func fetch() async throws -> ClaudeUsageData {
         let token = try Self.readAccessToken()
@@ -64,12 +84,19 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         task.arguments = ["find-generic-password", "-s", keychainService,
                           "-a", NSUserName(), "-w"]
-        let out = Pipe()
+        let out = Pipe(), err = Pipe()
         task.standardOutput = out
-        task.standardError = Pipe()
+        task.standardError = err
         try task.run()
         task.waitUntilExit()
-        guard task.terminationStatus == 0 else { throw NoOAuthCredentialsError() }
+        if task.terminationStatus != 0 {
+            // 44 = errSecItemNotFound → genuinely no credentials (stop permanently).
+            // Any other failure (locked keychain, denied prompt, …) is transient.
+            if task.terminationStatus == 44 { throw NoOAuthCredentialsError() }
+            let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            throw KeychainError(detail: stderr.isEmpty ? "security exited \(task.terminationStatus)" : stderr)
+        }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         let trimmed = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -80,9 +107,12 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
     // MARK: - Decode
 
     /// The payload has more buckets (seven_day_opus, extra_usage, …); we take only
-    /// the two we chart. `resets_at` is an ISO-8601 timestamp.
-    private static func decode(_ data: Data) throws -> ClaudeUsageData {
-        struct Bucket: Decodable { let utilization: Double; let resets_at: String }
+    /// the two we chart. `resets_at` is an ISO-8601 timestamp — but the API returns
+    /// it (and utilization) as `null` for an inactive/empty window, so both are
+    /// optional and such a bucket simply reads as "no data" rather than failing the
+    /// whole fetch.
+    static func decode(_ data: Data) throws -> ClaudeUsageData {
+        struct Bucket: Decodable { let utilization: Double?; let resets_at: String? }
         struct Extra: Decodable {
             let is_enabled: Bool?
             let monthly_limit: Double?
@@ -98,11 +128,12 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let isoNoFrac = ISO8601DateFormatter()
         isoNoFrac.formatOptions = [.withInternetDateTime]
-        func parse(_ b: Bucket?) -> UsageBucket? {
-            guard let b else { return nil }
-            let date = iso.date(from: b.resets_at) ?? isoNoFrac.date(from: b.resets_at)
-            guard let date else { return nil }
-            return UsageBucket(utilization: b.utilization, resetsAt: date)
+        // A window always renders: null/missing fields mean an idle window, shown
+        // as 0% usage / 0% time (it starts when first used), never "no data".
+        func parseWindow(_ b: Bucket?) -> UsageBucket {
+            var date: Date?
+            if let s = b?.resets_at { date = iso.date(from: s) ?? isoNoFrac.date(from: s) }
+            return UsageBucket(utilization: b?.utilization ?? 0, resetsAt: date)
         }
         func parseExtra(_ e: Extra?) -> ExtraUsage? {
             guard let e else { return nil }
@@ -115,8 +146,8 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
                               monthlyLimitCents: e.monthly_limit, utilization: util)
         }
         let payload = try JSONDecoder().decode(Payload.self, from: data)
-        return ClaudeUsageData(fiveHour: parse(payload.five_hour),
-                               sevenDay: parse(payload.seven_day),
+        return ClaudeUsageData(fiveHour: parseWindow(payload.five_hour),
+                               sevenDay: parseWindow(payload.seven_day),
                                extraUsage: parseExtra(payload.extra_usage))
     }
 }

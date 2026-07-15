@@ -5,7 +5,9 @@ import Foundation
 /// 100 near the cap). `resetsAt` is when this window rolls over to empty.
 struct UsageBucket: Equatable, Codable {
     var utilization: Double
-    var resetsAt: Date
+    /// nil when the window is idle (the API returns `resets_at: null` until the
+    /// first use). Treated as 0% elapsed time — the window starts when used.
+    var resetsAt: Date?
 }
 
 /// Month-to-date spend ("extra usage" / pay-as-you-go credits), mirroring the

@@ -12,8 +12,10 @@ import Foundation
 enum UsageMath {
     /// Fraction of `window` that has elapsed for a bucket, clamped to 0…1.
     /// Derived from the reset time exactly as SpaceTerm does:
-    /// elapsed = window − (resetsAt − now).
-    static func timeFraction(resetsAt: Date, window: TimeInterval, now: Date = Date()) -> Double {
+    /// elapsed = window − (resetsAt − now). A nil reset (idle window that hasn't
+    /// started) reads as 0% elapsed.
+    static func timeFraction(resetsAt: Date?, window: TimeInterval, now: Date = Date()) -> Double {
+        guard let resetsAt else { return 0 }
         let remaining = resetsAt.timeIntervalSince(now)
         let elapsed = window - remaining
         return clamp01(elapsed / window)
@@ -32,8 +34,9 @@ enum UsageMath {
     /// enough signal yet (too early, no usage, or window already expired). Can
     /// exceed 100 — that's the useful part of the warning. Matches SpaceTerm's
     /// `projectUsage`: utilization × window / elapsed.
-    static func projectUsage(utilization: Double, resetsAt: Date, window: TimeInterval,
+    static func projectUsage(utilization: Double, resetsAt: Date?, window: TimeInterval,
                              now: Date = Date()) -> Double? {
+        guard let resetsAt else { return nil }
         let remaining = resetsAt.timeIntervalSince(now)
         if remaining <= 0 { return nil }
         let elapsed = window - remaining
@@ -91,12 +94,22 @@ enum UsageMath {
         return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
     }
 
-    /// Fill fraction (0…1) for the spend circle. Prefers a user-set custom limit,
-    /// then the API-supplied limit, then the API's own utilization percentage.
+    /// Fill fraction (0…1) for the spend circle, measured against the effective
+    /// limit (custom preferred, else API-supplied). Only called when a limit exists.
     static func spendFraction(_ e: ExtraUsage, customLimitCents: Double? = nil) -> Double {
         if let custom = customLimitCents, custom > 0 { return clamp01(e.usedCents / custom) }
         if let limit = e.monthlyLimitCents, limit > 0 { return clamp01(e.usedCents / limit) }
-        return clamp01(e.utilization / 100)
+        return 0
+    }
+
+    /// Whether to show the spend donut at all: only when there's a maximum to
+    /// measure against (a custom limit, or an API-supplied one). Without any limit,
+    /// "% of limit" is meaningless, so the third circle is omitted.
+    static func showsSpendCircle(_ extra: ExtraUsage?, customLimitCents: Double?) -> Bool {
+        guard let extra else { return false }
+        if let custom = customLimitCents, custom > 0 { return true }
+        if let limit = extra.monthlyLimitCents, limit > 0 { return true }
+        return false
     }
 
     /// Highest per-minute consumption rate across a cumulative series, and when it

@@ -70,11 +70,13 @@ final class UsageMathTests: XCTestCase {
         XCTAssertEqual(UsageMath.monthTimeFraction(now: start, calendar: cal), 0, accuracy: 1e-9)
     }
 
-    func testSpendFractionPrefersLimit() {
+    func testSpendFractionUsesCustomThenAPILimit() {
         let e = ExtraUsage(isEnabled: true, usedCents: 24955, monthlyLimitCents: 50000, utilization: 99)
-        XCTAssertEqual(UsageMath.spendFraction(e), 0.4991, accuracy: 1e-9)   // used/limit, not utilization
+        XCTAssertEqual(UsageMath.spendFraction(e), 0.4991, accuracy: 1e-9)                     // used/API-limit
+        XCTAssertEqual(UsageMath.spendFraction(e, customLimitCents: 100000), 0.24955, accuracy: 1e-9) // custom wins
+        // No limit at all → 0 (and the donut is hidden; see showsSpendCircle).
         let noLimit = ExtraUsage(isEnabled: true, usedCents: 24955, monthlyLimitCents: nil, utilization: 30)
-        XCTAssertEqual(UsageMath.spendFraction(noLimit), 0.30, accuracy: 1e-9)
+        XCTAssertEqual(UsageMath.spendFraction(noLimit), 0)
     }
 
     func testSegmentsBlueWhenTimeLeads() {

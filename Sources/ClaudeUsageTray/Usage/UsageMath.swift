@@ -141,15 +141,20 @@ enum UsageMath {
         return f.string(from: NSNumber(value: value)) ?? String(value)
     }
 
-    /// Convert a cumulative series (utilization %, or spend cents) into a per-slot
-    /// *rate* series for the sparklines: each point is how much was consumed since
-    /// the previous sample. The first point is 0 (no prior to compare), and drops
-    /// (window resets, or spend rollover) clamp to 0 — so the line sits near zero
-    /// during quiet periods and spikes when usage bursts.
-    static func usageRateSeries(_ cumulative: [Double]) -> [Double] {
-        guard !cumulative.isEmpty else { return [] }
-        var out: [Double] = [0]
-        for i in 1..<cumulative.count { out.append(max(0, cumulative[i] - cumulative[i - 1])) }
+    /// Convert a cumulative time series (utilization %, or spend cents) into
+    /// per-minute *rate* points for the sparkline, keeping each sample's timestamp
+    /// so the line can be plotted on a real time axis. Each point is the
+    /// (non-negative) rise since the previous sample divided by the minutes between
+    /// them; the first point anchors the baseline at 0 (no predecessor), and drops
+    /// (window resets, spend rollover) clamp to 0.
+    static func usageRatePoints(_ samples: [(Date, Double)]) -> [(Date, Double)] {
+        guard let first = samples.first else { return [] }
+        var out: [(Date, Double)] = [(first.0, 0)]
+        for i in 1..<samples.count {
+            let minutes = samples[i].0.timeIntervalSince(samples[i - 1].0) / 60
+            let rate = minutes > 0 ? max(0, samples[i].1 - samples[i - 1].1) / minutes : 0
+            out.append((samples[i].0, rate))
+        }
         return out
     }
 

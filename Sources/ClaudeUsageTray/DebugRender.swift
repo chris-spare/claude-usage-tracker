@@ -61,14 +61,21 @@ enum DebugRender {
                          from: .zero, operation: .sourceOver, fraction: 1)
             drawLabel("error + custom limit ×5", centeredIn: NSRect(x: ex, y: 20 + eh, width: ew, height: 20))
 
-            // Sparkline preview: a cumulative usage series (climb, reset, climb)
-            // shown as its per-slot RATE — bursts spike, quiet slots rest at zero.
-            let cumulative = [10.0, 12, 20, 46, 50, 51, 8, 9, 30, 47]
+            // Sparkline preview over a fixed 2-hour axis ending "now": an older
+            // cluster, a gap (missed samples → broken line), then a recent cluster
+            // ending at the right edge. Empty stretches stay empty (not stretched).
+            let now = Date()
+            func t(_ minAgo: Double) -> Date { now.addingTimeInterval(-minAgo * 60) }
+            let samples: [(Date, Double)] = [
+                (t(90), 10), (t(85), 12), (t(80), 20), (t(75), 24),          // older cluster
+                (t(25), 30), (t(20), 46), (t(15), 50), (t(10), 51), (t(5), 70), (t(0), 78), // recent, after a gap
+            ]
             let sparkRect = NSRect(x: 40, y: height - 56, width: 260, height: 36)
-            Sparkline.draw(values: UsageMath.usageRateSeries(cumulative),
-                           in: sparkRect, color: .white, zeroBaseline: true, leftInset: 6, rightInset: 6)
-            drawLabel("usage-rate sparkline (zero baseline + hairlines)",
-                      centeredIn: NSRect(x: 40, y: height - 78, width: 340, height: 20))
+            Sparkline.draw(points: UsageMath.usageRatePoints(samples),
+                           window: 2 * 60 * 60, now: now,
+                           in: sparkRect, color: .white, gapThreshold: 8 * 60, leftInset: 6, rightInset: 6)
+            drawLabel("usage-rate sparkline (fixed 2h axis, gaps left blank)",
+                      centeredIn: NSRect(x: 40, y: height - 78, width: 360, height: 20))
             return true
         }
 

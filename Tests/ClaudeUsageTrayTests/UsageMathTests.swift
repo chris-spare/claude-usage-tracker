@@ -93,11 +93,18 @@ final class UsageMathTests: XCTestCase {
         XCTAssertFalse(seg.timeLeads)  // → red
     }
 
-    func testUsageRateSeriesClampsResets() {
-        // Cumulative climbs then resets; rate is per-slot rise, first point 0,
-        // the reset drop clamps to 0.
-        let rates = UsageMath.usageRateSeries([10, 12, 20, 5, 9])
-        XCTAssertEqual(rates, [0, 2, 8, 0, 4])
+    func testUsageRatePoints() {
+        let t = Date(timeIntervalSince1970: 1_700_000_000)
+        // 5-min spacing → per-minute rate = delta / 5; first point 0; reset clamps.
+        let samples: [(Date, Double)] = [
+            (t, 10),
+            (t.addingTimeInterval(5 * 60), 20),   // +10 / 5min = 2/min
+            (t.addingTimeInterval(10 * 60), 5),   // reset → clamp 0
+            (t.addingTimeInterval(20 * 60), 9),   // +4 over 10min = 0.4/min
+        ]
+        let pts = UsageMath.usageRatePoints(samples)
+        XCTAssertEqual(pts.map { $0.0 }, samples.map { $0.0 })   // timestamps preserved
+        XCTAssertEqual(pts.map { $0.1 }, [0, 2, 0, 0.4])         // per-minute rates, first anchored at 0
     }
 
     func testPeakRatePerMinute() {

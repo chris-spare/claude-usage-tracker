@@ -192,7 +192,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// section is hidden.
     private func applyMetric(spark: SparklineView, sparkItem: NSMenuItem, peakItem: NSMenuItem,
                              points: [(Date, Double)], unit: RateUnit, visible: Bool = true) {
-        spark.values = points.map { $0.1 }
+        spark.samples = points
         sparkItem.isHidden = !visible || points.count < 2
         if visible, let peak = UsageMath.peakRatePerMinute(points) {
             peakItem.isHidden = false

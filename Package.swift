@@ -5,7 +5,7 @@ import PackageDescription
 // 7-day Claude Code usage) and a details menu. Pure AppKit, no external deps.
 let package = Package(
     name: "ClaudeUsageTray",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
             name: "ClaudeUsageTray",

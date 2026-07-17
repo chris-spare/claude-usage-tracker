@@ -31,9 +31,19 @@ open the menu → **Set Custom Limit…**, enter a dollar amount, and it's used
 instead (the menu then shows both your custom limit and the API limit). **Clear
 Custom Limit** reverts to the API value.
 
-## Getting started
+## Install
 
-Requires macOS 15+ and the Swift toolchain (install Xcode or the Command Line
+Runs on **macOS 13 (Ventura) or later**, on both Apple Silicon and Intel Macs.
+
+1. Download `ClaudeUsage.zip` from the [latest release](../../releases/latest).
+2. Unzip it and drag **Claude Usage.app** into `/Applications`.
+3. Open it. It's signed and notarized by Apple, so it launches without warnings
+   (on first open macOS confirms it was downloaded from the internet — click
+   **Open**).
+
+## Building from source
+
+Requires macOS 13+ and the Swift toolchain (install Xcode or the Command Line
 Tools: `xcode-select --install`).
 
 ```bash
@@ -56,6 +66,29 @@ To stop it: click the icon → **Quit**.
 It's **on by default** — the app registers itself as a login item the first time
 it runs, so it comes back after a reboot. You can toggle it any time from the menu
 (**Open at Login**); your choice sticks.
+
+## Building a release
+
+`./scripts/make-release.sh` produces the distributable artifact: a universal
+(arm64 + x86_64) build, signed with a Developer ID Application certificate under
+a hardened runtime, notarized by Apple, and stapled. Output is
+`build/ClaudeUsage.zip` — attach it to a GitHub Release.
+
+One-time setup:
+
+1. A **Developer ID Application** certificate in your login Keychain (Xcode →
+   Settings → Accounts → Manage Certificates → **+**). Requires an Apple
+   Developer Program membership.
+2. Notarization credentials stored under a keychain profile:
+
+   ```bash
+   xcrun notarytool store-credentials "claude-usage-notary" \
+     --apple-id "you@example.com" --team-id <YOUR_TEAM_ID>
+   ```
+
+   (Uses an [app-specific password](https://appleid.apple.com).) Override the
+   profile name with `NOTARY_PROFILE=… ./scripts/make-release.sh` if you use a
+   different one.
 
 ## Notes
 

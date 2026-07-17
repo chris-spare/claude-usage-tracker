@@ -79,20 +79,6 @@ final class UsageMathTests: XCTestCase {
         XCTAssertEqual(UsageMath.spendFraction(noLimit), 0)
     }
 
-    func testSegmentsBlueWhenTimeLeads() {
-        let seg = UsageMath.segments(time: 0.6, usage: 0.45)
-        XCTAssertEqual(seg.yellowEnd, 0.45, accuracy: 1e-9)
-        XCTAssertEqual(seg.surplusEnd, 0.6, accuracy: 1e-9)
-        XCTAssertTrue(seg.timeLeads)   // → blue
-    }
-
-    func testSegmentsRedWhenUsageLeads() {
-        let seg = UsageMath.segments(time: 0.3, usage: 0.5)
-        XCTAssertEqual(seg.yellowEnd, 0.3, accuracy: 1e-9)
-        XCTAssertEqual(seg.surplusEnd, 0.5, accuracy: 1e-9)
-        XCTAssertFalse(seg.timeLeads)  // → red
-    }
-
     func testUsageRatePoints() {
         let t = Date(timeIntervalSince1970: 1_700_000_000)
         // 5-min spacing → per-minute rate = delta / 5; first point 0; reset clamps.

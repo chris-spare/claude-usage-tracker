@@ -5,10 +5,8 @@ import Foundation
 ///
 /// The two pie layers, both drawn from 12 o'clock clockwise:
 ///   • time layer  — fraction of the window that has elapsed (0 at window start,
-///                    → 1 just before reset).
-///   • usage layer  — utilization / 100.
-/// Where they overlap is yellow; the surplus beyond the overlap is blue when more
-/// time than usage has elapsed (under pace) or red when usage leads (over pace).
+///                    → 1 just before reset). Drawn as a gray wedge.
+///   • usage layer  — utilization / 100. Drawn as a white ring over the time wedge.
 enum UsageMath {
     /// Fraction of `window` that has elapsed for a bucket, clamped to 0…1.
     /// Derived from the reset time exactly as SpaceTerm does:
@@ -43,22 +41,6 @@ enum UsageMath {
         if elapsed < projectionMinElapsed { return nil }
         if utilization <= 0 { return nil }
         return utilization * (window / elapsed)
-    }
-
-    /// The two arc boundaries and the surplus color, as fractions of the circle
-    /// measured clockwise from 12 o'clock.
-    struct Segments: Equatable {
-        /// 0 → yellowEnd is the overlap (yellow).
-        var yellowEnd: Double
-        /// yellowEnd → surplusEnd is the surplus (blue or red); empty when equal.
-        var surplusEnd: Double
-        /// True = time leads (blue, under pace); false = usage leads (red, over pace).
-        var timeLeads: Bool
-    }
-
-    static func segments(time: Double, usage: Double) -> Segments {
-        let t = clamp01(time), u = clamp01(usage)
-        return Segments(yellowEnd: min(t, u), surplusEnd: max(t, u), timeLeads: t >= u)
     }
 
     // MARK: - Text formatting

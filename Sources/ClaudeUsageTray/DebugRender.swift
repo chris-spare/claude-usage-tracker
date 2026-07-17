@@ -7,9 +7,9 @@ enum DebugRender {
     /// (title, time fraction, usage fraction)
     private static let cases: [(String, Double, Double)] = [
         ("empty (t0 u0)", 0.0, 0.0),
-        ("time leads → blue", 0.60, 0.45),
-        ("usage leads → red", 0.30, 0.50),
-        ("equal → all yellow", 0.50, 0.50),
+        ("time leads usage", 0.60, 0.45),
+        ("usage leads time", 0.30, 0.50),
+        ("equal", 0.50, 0.50),
         ("usage over 100%", 0.30, 1.0),
         ("nearly full time", 0.95, 0.80),
         ("tiny sliver time", 0.03, 0.0),

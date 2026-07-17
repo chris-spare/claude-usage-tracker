@@ -12,6 +12,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // App title (always at the very top).
     private let appTitle = MenuBarController.disabledItem("Claude Usage Tracker")
 
+    // Large side-by-side rings with captions, just under the title.
+    private let ringsHeader = RingsHeaderView(frame: NSRect(x: 0, y: 0, width: 220, height: 82))
+    private let ringsHeaderItem = MenuBarController.disabledItem("")
+
     // Error section (top; hidden unless the last fetch failed).
     private let errorTitle = MenuBarController.disabledItem("Fetch Error")
     private let errorMessage = MenuBarController.disabledItem("")
@@ -86,8 +90,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         sevenDaySparkItem.view = sevenDaySpark
         spendSparkItem.view = spendSpark
 
-        // App title, then the error section (shown only on failure).
+        ringsHeader.setFrameSize(NSSize(width: 220, height: ringsHeader.preferredHeight))
+        ringsHeaderItem.view = ringsHeader
+
+        // App title, the big rings, then the error section (shown only on failure).
         menu.addItem(appTitle)
+        menu.addItem(.separator())
+        menu.addItem(ringsHeaderItem)
         menu.addItem(.separator())
         for item in [errorTitle, errorMessage] { menu.addItem(item) }
         menu.addItem(errorSeparator)
@@ -160,6 +169,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         for item in [errorTitle, errorMessage] { item.isHidden = !hasError }
         errorSeparator.isHidden = !hasError
         errorMessage.title = lastError ?? ""
+
+        // Big rings mirror the tray image (drawn at the last-fetch snapshot).
+        ringsHeader.circles = PieChart.circles(fiveHour: data?.fiveHour, sevenDay: data?.sevenDay,
+                                               extraUsage: data?.extraUsage,
+                                               customLimitCents: Settings.customLimitCents, now: snapshot)
 
         applyBucket(bucket: data?.fiveHour, window: UsageWindow.fiveHour,
                     usageItem: fiveHourUsage, resetItem: fiveHourReset, now: now, snapshot: snapshot)

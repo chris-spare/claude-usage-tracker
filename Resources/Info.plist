@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Usage</string>
+    <string>AI Usage Tracker</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Usage</string>
+    <string>AI Usage Tracker</string>
     <key>CFBundleIdentifier</key>
-    <string>com.chriswa.claudeusagetracker</string>
+    <string>com.chriswa.aiusagetracker</string>
     <key>CFBundleExecutable</key>
-    <string>ClaudeUsageTray</string>
+    <string>AIUsageTracker</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

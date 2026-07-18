@@ -18,7 +18,7 @@ final class UsagePoller {
     /// so the cooldown survives restarts).
     var onAttempt: ((Date) -> Void)?
     /// Called with each successful fetch.
-    var onData: ((ClaudeUsageData) -> Void)?
+    var onData: ((ProviderSnapshot) -> Void)?
     /// Called with a short, user-facing message when a fetch fails.
     var onError: ((String) -> Void)?
 
@@ -69,37 +69,17 @@ final class UsagePoller {
         let provider = self.provider
         Task { [weak self] in
             do {
-                let data = try await provider.fetch()
-                let f = data.fiveHour.map { "\(Int($0.utilization))%" } ?? "—"
-                let s = data.sevenDay.map { "\(Int($0.utilization))%" } ?? "—"
-                Log.log("usage: fetched (5h=\(f), 7d=\(s))")
-                self?.onData?(data)
+                let snapshot = try await provider.fetch()
+                let summary = snapshot.windows.map { "\($0.caption)=\(Int($0.utilization))%" }.joined(separator: ", ")
+                Log.log("usage[\(provider.id.rawValue)]: fetched (\(summary.isEmpty ? "no windows" : summary))")
+                self?.onData?(snapshot)
                 self?.scheduleAfterAttempt()
             } catch {
-                let (message, permanent) = UsagePoller.describe(error)
-                Log.log("usage: fetch failed (\(permanent ? "permanent" : "will retry")): \(error)")
+                let (message, permanent) = provider.classify(error)
+                Log.log("usage[\(provider.id.rawValue)]: fetch failed (\(permanent ? "permanent" : "will retry")): \(error)")
                 self?.onError?(message)
                 if permanent { self?.stop() } else { self?.scheduleAfterAttempt() }
             }
-        }
-    }
-
-    /// Turn a fetch error into a specific, user-facing message and whether it's
-    /// permanent (stop polling) or transient (retry next cooldown).
-    private static func describe(_ error: Error) -> (message: String, permanent: Bool) {
-        switch error {
-        case is ClaudeUsageFetcher.NoOAuthCredentialsError:
-            return ("No Claude subscription credentials in Keychain (API-key account?)", true)
-        case let e as ClaudeUsageFetcher.KeychainError:
-            return ("Keychain read failed: \(e.detail)", false)
-        case let e as ClaudeUsageFetcher.UsageAPIError:
-            return (e.userMessage, false)
-        case let e as URLError:
-            return ("Network error: \(e.localizedDescription)", false)
-        case is DecodingError:
-            return ("Couldn't parse the usage response", false)
-        default:
-            return ("Fetch failed: \(error.localizedDescription)", false)
         }
     }
 

@@ -1,0 +1,88 @@
+import Foundation
+
+/// One enabled provider's current state for display: its last good snapshot (nil
+/// until the first success), when that arrived, its current error (nil when the last
+/// fetch succeeded), and its rolling history for sparklines. A provider with a
+/// non-nil `error` renders as a warning glyph in its slot; `snapshot` may still hold
+/// the last good data for the dropdown text.
+struct ProviderView {
+    let id: ProviderID
+    let displayName: String
+    var snapshot: ProviderSnapshot?
+    var lastUpdated: Date?
+    var error: String?
+    var history: [UsageHistory.Sample]
+
+    init(id: ProviderID, displayName: String, snapshot: ProviderSnapshot? = nil,
+         lastUpdated: Date? = nil, error: String? = nil, history: [UsageHistory.Sample] = []) {
+        self.id = id
+        self.displayName = displayName
+        self.snapshot = snapshot
+        self.lastUpdated = lastUpdated
+        self.error = error
+        self.history = history
+    }
+}
+
+/// The whole tray's state: the ordered enabled providers plus the single cost total
+/// the combined spend pie fills against. Shared source of truth for the tray image,
+/// the dropdown header rings, and the menu sections.
+struct TrayViewModel {
+    var providers: [ProviderView]
+    var customLimitCents: Double
+
+    /// Sum of every enabled provider's month-to-date spend (cents).
+    var combinedSpendCents: Double {
+        providers.compactMap { $0.snapshot?.spend?.usedCents }.reduce(0, +)
+    }
+
+    /// Whether any enabled provider reports spend at all (gates the cost pie).
+    var hasAnySpend: Bool {
+        providers.contains { $0.snapshot?.spend != nil }
+    }
+
+    /// Most recent successful fetch across providers (for the "Updated … ago" line).
+    var latestUpdate: Date? {
+        providers.compactMap { $0.lastUpdated }.max()
+    }
+
+    /// Combined cumulative spend (cents) over time, for the cost sparkline / peak.
+    ///
+    /// Providers sample at different (often sub-second-apart) instants, so naively
+    /// summing by timestamp yields a jagged series whose per-minute rate explodes on
+    /// the tiny gaps. Instead we sample at the union of all timestamps and, at each
+    /// instant, sum every provider's *linearly interpolated* cumulative spend (a
+    /// blend of its two surrounding samples). Each provider's contribution is then
+    /// piecewise-linear, so `delta / gap` recovers the true combined slope regardless
+    /// of how close two points sit — reasonable rather than pedantically exact.
+    var spendSeries: [(Date, Double)] {
+        let series = providers
+            .map { p in p.history.compactMap { s in s.spendCents.map { (s.date, $0) } } }
+            .filter { !$0.isEmpty }
+        guard !series.isEmpty else { return [] }
+        let times = Set(series.flatMap { $0.map(\.0) }).sorted()
+        return times.map { t in (t, series.reduce(0) { $0 + Self.interpolate($1, at: t) }) }
+    }
+
+    /// A provider's cumulative spend at `t`, linearly interpolated between its
+    /// surrounding samples and held flat outside its sampled range.
+    private static func interpolate(_ points: [(Date, Double)], at t: Date) -> Double {
+        guard let first = points.first, let last = points.last else { return 0 }
+        if t <= first.0 { return first.1 }
+        if t >= last.0 { return last.1 }
+        for i in 1..<points.count where points[i].0 >= t {
+            let (t0, v0) = points[i - 1], (t1, v1) = points[i]
+            let span = t1.timeIntervalSince(t0)
+            return span > 0 ? v0 + (v1 - v0) * (t.timeIntervalSince(t0) / span) : v1
+        }
+        return last.1
+    }
+}
+
+extension ProviderView {
+    /// This provider's cumulative utilization series for one window caption (oldest
+    /// first) — the source for that window's sparkline / recent-peak.
+    func series(forWindow caption: String) -> [(Date, Double)] {
+        history.compactMap { s in s.windows[caption].map { (s.date, $0) } }
+    }
+}

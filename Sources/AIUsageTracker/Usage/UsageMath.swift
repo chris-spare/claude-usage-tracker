@@ -8,15 +8,28 @@ import Foundation
 ///                    → 1 just before reset). Drawn as a gray wedge.
 ///   • usage layer  — utilization / 100. Drawn as a white ring over the time wedge.
 enum UsageMath {
-    /// Fraction of `window` that has elapsed for a bucket, clamped to 0…1.
-    /// Derived from the reset time exactly as SpaceTerm does:
-    /// elapsed = window − (resetsAt − now). A nil reset (idle window that hasn't
-    /// started) reads as 0% elapsed.
-    static func timeFraction(resetsAt: Date?, window: TimeInterval, now: Date = Date()) -> Double {
-        guard let resetsAt else { return 0 }
-        let remaining = resetsAt.timeIntervalSince(now)
-        let elapsed = window - remaining
-        return clamp01(elapsed / window)
+    /// Elapsed time and total span for a window, or nil when there's no time basis.
+    /// For a rolling window elapsed = length − (resetsAt − now); an idle window
+    /// (nil reset) reads as 0 elapsed. For an interval it's now−start over end−start.
+    static func elapsedAndTotal(_ basis: TimeBasis, resetsAt: Date?,
+                                now: Date = Date()) -> (elapsed: TimeInterval, total: TimeInterval)? {
+        switch basis {
+        case .rollingWindow(let length):
+            guard let resetsAt else { return (0, length) }
+            return (length - resetsAt.timeIntervalSince(now), length)
+        case .interval(let start, let end):
+            return (now.timeIntervalSince(start), end.timeIntervalSince(start))
+        case .none:
+            return nil
+        }
+    }
+
+    /// Fraction of a window's span that has elapsed, clamped to 0…1 (the gray/dark
+    /// time wedge). No time basis reads as 0.
+    static func timeFraction(_ basis: TimeBasis, resetsAt: Date?, now: Date = Date()) -> Double {
+        guard let (elapsed, total) = elapsedAndTotal(basis, resetsAt: resetsAt, now: now),
+              total > 0 else { return 0 }
+        return clamp01(elapsed / total)
     }
 
     /// Usage layer fraction (utilization is a 0…100 percentage), clamped to 0…1
@@ -29,18 +42,14 @@ enum UsageMath {
     static let projectionMinElapsed: TimeInterval = 10 * 60
 
     /// Linear extrapolation of end-of-window utilization, or nil when there isn't
-    /// enough signal yet (too early, no usage, or window already expired). Can
-    /// exceed 100 — that's the useful part of the warning. Matches SpaceTerm's
-    /// `projectUsage`: utilization × window / elapsed.
-    static func projectUsage(utilization: Double, resetsAt: Date?, window: TimeInterval,
-                             now: Date = Date()) -> Double? {
-        guard let resetsAt else { return nil }
-        let remaining = resetsAt.timeIntervalSince(now)
-        if remaining <= 0 { return nil }
-        let elapsed = window - remaining
-        if elapsed < projectionMinElapsed { return nil }
-        if utilization <= 0 { return nil }
-        return utilization * (window / elapsed)
+    /// enough signal yet (too early, no usage, window already elapsed, or the window
+    /// doesn't support projection). Can exceed 100 — that's the useful part of the
+    /// warning. utilization × total / elapsed.
+    static func projectUsage(_ window: UsageWindow, now: Date = Date()) -> Double? {
+        guard window.supportsProjection, window.utilization > 0,
+              let (elapsed, total) = elapsedAndTotal(window.timeBasis, resetsAt: window.resetsAt, now: now),
+              elapsed >= projectionMinElapsed, elapsed < total else { return nil }
+        return window.utilization * (total / elapsed)
     }
 
     // MARK: - Text formatting
@@ -76,22 +85,12 @@ enum UsageMath {
         return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
     }
 
-    /// Fill fraction (0…1) for the spend circle, measured against the effective
-    /// limit (custom preferred, else API-supplied). Only called when a limit exists.
-    static func spendFraction(_ e: ExtraUsage, customLimitCents: Double? = nil) -> Double {
-        if let custom = customLimitCents, custom > 0 { return clamp01(e.usedCents / custom) }
-        if let limit = e.monthlyLimitCents, limit > 0 { return clamp01(e.usedCents / limit) }
-        return 0
-    }
-
-    /// Whether to show the spend donut at all: only when there's a maximum to
-    /// measure against (a custom limit, or an API-supplied one). Without any limit,
-    /// "% of limit" is meaningless, so the third circle is omitted.
-    static func showsSpendCircle(_ extra: ExtraUsage?, customLimitCents: Double?) -> Bool {
-        guard let extra else { return false }
-        if let custom = customLimitCents, custom > 0 { return true }
-        if let limit = extra.monthlyLimitCents, limit > 0 { return true }
-        return false
+    /// Fill fraction (0…1) for the combined cost circle: total spend across providers
+    /// over the user's cost total. The limit always exists (defaults to $2500), so
+    /// this is simply used/limit clamped.
+    static func spendFraction(usedCents: Double, limitCents: Double) -> Double {
+        guard limitCents > 0 else { return 0 }
+        return clamp01(usedCents / limitCents)
     }
 
     /// Highest per-minute consumption rate across a cumulative series, and when it

@@ -3,7 +3,7 @@ import ServiceManagement
 
 /// Thin wrapper over SMAppService for launch-at-login (macOS 13+).
 enum LaunchAtLogin {
-    private static let configuredKey = "cut.didConfigureLoginItem"
+    private static let configuredKey = "aiut.didConfigureLoginItem"
 
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled

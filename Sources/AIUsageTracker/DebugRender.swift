@@ -1,6 +1,6 @@
 import AppKit
 
-/// Dev-only: `ClaudeUsageTray --render <out.png>` draws a grid of pie scenarios at
+/// Dev-only: `AIUsageTracker --render <out.png>` draws a grid of pie scenarios at
 /// large scale (so the arcs are eyeball-verifiable) plus a menu-bar-size preview,
 /// writes a PNG, and exits. Not used by the running app.
 enum DebugRender {
@@ -34,27 +34,41 @@ enum DebugRender {
                 let x = CGFloat(col) * cell
                 let y = height - 80 - CGFloat(row + 1) * (cell + labelH) + labelH
                 let pieRect = NSRect(x: x + (cell - pieD) / 2, y: y, width: pieD, height: pieD)
-                PieChart.drawPie(time: c.1, usage: c.2, in: pieRect)
+                let pal = PieChart.palette(for: .claude)
+                PieChart.drawPie(time: c.1, usage: c.2, in: pieRect, timeColor: pal.time, usageColor: pal.usage)
                 drawLabel(c.0, centeredIn: NSRect(x: x, y: y - labelH, width: cell, height: labelH))
             }
 
+            let now0 = Date()
+            let monthStart = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: now0)) ?? now0
+            let monthEnd = Calendar.current.date(byAdding: .month, value: 1, to: monthStart) ?? now0
+            let claude = ProviderView(id: .claude, displayName: "Claude",
+                snapshot: ProviderSnapshot(windows: [
+                    UsageWindow(caption: "5-Hour", utilization: 72, resetsAt: now0.addingTimeInterval(2 * 3600),
+                                timeBasis: .rollingWindow(length: WindowLength.fiveHour)),
+                    UsageWindow(caption: "7-Day", utilization: 40, resetsAt: now0.addingTimeInterval(5 * 24 * 3600),
+                                timeBasis: .rollingWindow(length: WindowLength.sevenDay)),
+                ], spend: SpendInfo(usedCents: 12345, apiLimitCents: 50000, label: "Claude extra usage")),
+                lastUpdated: now0)
+
             // Draw the actual tray image scaled up so we see the true menu-bar look.
-            let tray = PieChart.trayImage(fiveHour: UsageBucket(utilization: 72, resetsAt: Date().addingTimeInterval(2 * 3600)),
-                                          sevenDay: UsageBucket(utilization: 40, resetsAt: Date().addingTimeInterval(5 * 24 * 3600)),
-                                          extraUsage: ExtraUsage(isEnabled: true, usedCents: 12345,
-                                                                 monthlyLimitCents: 50000, utilization: 24.69))
+            let tray = PieChart.trayImage(from: TrayViewModel(providers: [claude], customLimitCents: 250000), now: now0)
             let scale: CGFloat = 5
             let tw = tray.size.width * scale, th = tray.size.height * scale
             tray.draw(in: NSRect(x: 20, y: 20, width: tw, height: th),
                       from: .zero, operation: .sourceOver, fraction: 1)
             drawLabel("actual tray image ×5", centeredIn: NSRect(x: 20, y: 20 + th, width: tw, height: 20))
 
-            // Error-state tray (custom limit + warning glyph).
+            // Multi-provider tray with one errored provider (Codex) + a Cursor window.
+            let codexErr = ProviderView(id: .codex, displayName: "Codex", error: "Codex token expired")
+            let cursor = ProviderView(id: .cursor, displayName: "Cursor",
+                snapshot: ProviderSnapshot(windows: [
+                    UsageWindow(caption: "Monthly", utilization: 18, resetsAt: monthEnd,
+                                timeBasis: .interval(start: monthStart, end: monthEnd)),
+                ], spend: SpendInfo(usedCents: 4200, apiLimitCents: 150000, label: "Cursor on-demand")),
+                lastUpdated: now0)
             let errTray = PieChart.trayImage(
-                fiveHour: UsageBucket(utilization: 72, resetsAt: Date().addingTimeInterval(2 * 3600)),
-                sevenDay: UsageBucket(utilization: 40, resetsAt: Date().addingTimeInterval(5 * 24 * 3600)),
-                extraUsage: ExtraUsage(isEnabled: true, usedCents: 12345, monthlyLimitCents: 50000, utilization: 24.69),
-                customLimitCents: 30000, showError: true)
+                from: TrayViewModel(providers: [claude, codexErr, cursor], customLimitCents: 30000), now: now0)
             let ew = errTray.size.width * scale, eh = errTray.size.height * scale
             let ex = 20 + tw + 40
             errTray.draw(in: NSRect(x: ex, y: 20, width: ew, height: eh),

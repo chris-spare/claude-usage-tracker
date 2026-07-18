@@ -8,6 +8,8 @@ import Foundation
 ///
 /// Cadence: the caller must not fetch more than once per 5 minutes.
 final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
+    let id: ProviderID = .claude
+    let displayName = "Claude"
     /// Never faster than once per 5 minutes (Anthropic usage endpoint).
     let suggestedInterval: TimeInterval = 5 * 60
 
@@ -45,7 +47,7 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
         }
     }
 
-    func fetch() async throws -> ClaudeUsageData {
+    func fetch() async throws -> ProviderSnapshot {
         let token = try Self.readAccessToken()
 
         var req = URLRequest(url: Self.usageURL, timeoutInterval: Self.timeout)
@@ -66,42 +68,42 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
         return try Self.decode(data)
     }
 
+    func classify(_ error: Error) -> (message: String, permanent: Bool) {
+        switch error {
+        case is NoOAuthCredentialsError:
+            return ("No Claude subscription credentials in Keychain (API-key account?)", true)
+        case let e as KeychainError:
+            return ("Keychain read failed: \(e.detail)", false)
+        case let e as UsageAPIError:
+            return (e.userMessage, false)
+        case let e as URLError:
+            return ("Network error: \(e.localizedDescription)", false)
+        case is DecodingError:
+            return ("Couldn't parse the usage response", false)
+        default:
+            return ("Fetch failed: \(error.localizedDescription)", false)
+        }
+    }
+
     // MARK: - Keychain
 
-    /// Read the `claudeAiOauth.accessToken` from the Keychain via `security`.
+    /// Read the `claudeAiOauth.accessToken` from the Keychain via `security`. Maps
+    /// the shared Keychain errors onto this provider's own taxonomy.
     private static func readAccessToken() throws -> String {
-        let raw = try runSecurity()
+        let raw: String
+        do {
+            raw = try Keychain.readGenericPassword(service: keychainService, account: NSUserName())
+        } catch is Keychain.ItemNotFound {
+            throw NoOAuthCredentialsError()
+        } catch let e as Keychain.AccessError {
+            throw KeychainError(detail: e.detail)
+        }
         guard let json = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
               let oauth = json["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String, !token.isEmpty else {
             throw NoOAuthCredentialsError()
         }
         return token
-    }
-
-    private static func runSecurity() throws -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        task.arguments = ["find-generic-password", "-s", keychainService,
-                          "-a", NSUserName(), "-w"]
-        let out = Pipe(), err = Pipe()
-        task.standardOutput = out
-        task.standardError = err
-        try task.run()
-        task.waitUntilExit()
-        if task.terminationStatus != 0 {
-            // 44 = errSecItemNotFound → genuinely no credentials (stop permanently).
-            // Any other failure (locked keychain, denied prompt, …) is transient.
-            if task.terminationStatus == 44 { throw NoOAuthCredentialsError() }
-            let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw KeychainError(detail: stderr.isEmpty ? "security exited \(task.terminationStatus)" : stderr)
-        }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        let trimmed = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else { throw NoOAuthCredentialsError() }
-        return trimmed
     }
 
     // MARK: - Decode
@@ -111,7 +113,7 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
     /// it (and utilization) as `null` for an inactive/empty window, so both are
     /// optional and such a bucket simply reads as "no data" rather than failing the
     /// whole fetch.
-    static func decode(_ data: Data) throws -> ClaudeUsageData {
+    static func decode(_ data: Data) throws -> ProviderSnapshot {
         struct Bucket: Decodable { let utilization: Double?; let resets_at: String? }
         struct Extra: Decodable {
             let is_enabled: Bool?
@@ -130,24 +132,23 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
         isoNoFrac.formatOptions = [.withInternetDateTime]
         // A window always renders: null/missing fields mean an idle window, shown
         // as 0% usage / 0% time (it starts when first used), never "no data".
-        func parseWindow(_ b: Bucket?) -> UsageBucket {
+        func parseWindow(_ b: Bucket?, caption: String, length: TimeInterval) -> UsageWindow {
             var date: Date?
             if let s = b?.resets_at { date = iso.date(from: s) ?? isoNoFrac.date(from: s) }
-            return UsageBucket(utilization: b?.utilization ?? 0, resetsAt: date)
+            return UsageWindow(caption: caption, utilization: b?.utilization ?? 0, resetsAt: date,
+                               timeBasis: .rollingWindow(length: length))
         }
-        func parseExtra(_ e: Extra?) -> ExtraUsage? {
+        func parseExtra(_ e: Extra?) -> SpendInfo? {
             guard let e else { return nil }
-            let used = e.used_credits ?? 0
-            let util = e.utilization ?? {
-                if let limit = e.monthly_limit, limit > 0 { return used / limit * 100 }
-                return 0
-            }()
-            return ExtraUsage(isEnabled: e.is_enabled ?? false, usedCents: used,
-                              monthlyLimitCents: e.monthly_limit, utilization: util)
+            return SpendInfo(usedCents: e.used_credits ?? 0, apiLimitCents: e.monthly_limit,
+                             label: "Claude extra usage")
         }
         let payload = try JSONDecoder().decode(Payload.self, from: data)
-        return ClaudeUsageData(fiveHour: parseWindow(payload.five_hour),
-                               sevenDay: parseWindow(payload.seven_day),
-                               extraUsage: parseExtra(payload.extra_usage))
+        return ProviderSnapshot(
+            windows: [
+                parseWindow(payload.five_hour, caption: "5-Hour", length: WindowLength.fiveHour),
+                parseWindow(payload.seven_day, caption: "7-Day", length: WindowLength.sevenDay),
+            ],
+            spend: parseExtra(payload.extra_usage))
     }
 }

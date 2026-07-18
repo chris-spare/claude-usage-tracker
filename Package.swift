@@ -1,20 +1,20 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Claude Usage Tray — a macOS menu-bar app that shows two pie charts (5-hour and
-// 7-day Claude Code usage) and a details menu. Pure AppKit, no external deps.
+// AI Usage Tracker — a macOS menu-bar app showing per-provider usage pie charts
+// (Claude, Codex, Cursor) and a details menu. Pure AppKit, no external deps.
 let package = Package(
-    name: "ClaudeUsageTray",
+    name: "AIUsageTracker",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "ClaudeUsageTray",
-            path: "Sources/ClaudeUsageTray"
+            name: "AIUsageTracker",
+            path: "Sources/AIUsageTracker"
         ),
         .testTarget(
-            name: "ClaudeUsageTrayTests",
-            dependencies: ["ClaudeUsageTray"],
-            path: "Tests/ClaudeUsageTrayTests"
+            name: "AIUsageTrackerTests",
+            dependencies: ["AIUsageTracker"],
+            path: "Tests/AIUsageTrackerTests"
         ),
     ]
 )

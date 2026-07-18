@@ -1,15 +1,10 @@
 import Foundation
 
-/// Minimal append-only file logger at ~/Library/Logs/ClaudeUsageTray.log, so we
+/// Minimal append-only file logger at ~/Library/Logs/AIUsageTracker.log, so we
 /// can diagnose the real menu-bar app (whose stdout is otherwise buried). Also
 /// mirrors to stderr for `swift run`.
 enum Log {
-    static let fileURL: URL = {
-        let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("ClaudeUsageTray.log")
-    }()
+    static let fileURL: URL = AppPaths.logFile
 
     private static let lock = NSLock()
     private static let formatter: DateFormatter = {

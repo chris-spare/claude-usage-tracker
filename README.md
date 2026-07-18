@@ -83,7 +83,8 @@ Login**); your choice sticks.
 `./scripts/make-release.sh` produces the distributable artifact: a universal
 (arm64 + x86_64) build, signed with a Developer ID Application certificate under a
 hardened runtime, notarized by Apple, and stapled. Output is `build/AISpendTracker.zip`
-— attach it to a GitHub Release.
+— attach it to a GitHub Release. For the full step-by-step release runbook (version
+bump, publishing, troubleshooting), see [docs/RELEASING.md](docs/RELEASING.md).
 
 One-time setup:
 

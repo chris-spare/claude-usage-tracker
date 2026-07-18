@@ -16,6 +16,7 @@ enum DebugRender {
         ("full both", 1.0, 1.0),
     ]
 
+    @MainActor
     static func run(outPath: String) {
         let cell: CGFloat = 160
         let pieD: CGFloat = 120
@@ -87,7 +88,9 @@ enum DebugRender {
             let sparkRect = NSRect(x: 40, y: height - 56, width: 260, height: 36)
             Sparkline.draw(points: UsageMath.usageRatePoints(samples),
                            window: 2 * 60 * 60, now: now,
-                           in: sparkRect, color: .white, gapThreshold: 8 * 60, leftInset: 6, rightInset: 6)
+                           in: sparkRect, color: PieChart.palette(for: .claude).usage,
+                           background: PieChart.palette(for: .claude).time,
+                           gapThreshold: 8 * 60, leftInset: 6, rightInset: 6)
             drawLabel("usage-rate sparkline (fixed 2h axis, gaps left blank)",
                       centeredIn: NSRect(x: 40, y: height - 78, width: 360, height: 20))
             return true
@@ -98,6 +101,58 @@ enum DebugRender {
               let png = rep.representation(using: .png, properties: [:]) else {
             FileHandle.standardError.write(Data("render: failed to encode PNG\n".utf8)); return
         }
+        try? png.write(to: URL(fileURLWithPath: outPath))
+        FileHandle.standardError.write(Data("render: wrote \(outPath)\n".utf8))
+
+        renderHeader(outPath: (outPath as NSString).deletingPathExtension + "-header.png")
+    }
+
+    /// Render the dropdown rings header (columns + reset lines + sparklines) to its
+    /// own PNG, so the menu-open layout is eyeball-verifiable without launching.
+    @MainActor
+    private static func renderHeader(outPath: String) {
+        let now = Date()
+        func t(_ minAgo: Double) -> Date { now.addingTimeInterval(-minAgo * 60) }
+        // A rising utilization history so each window's sparkline has real data.
+        func history(_ caption: String, _ base: Double, spend: Double? = nil) -> [UsageHistory.Sample] {
+            [90, 75, 60, 45, 30, 15, 5, 0].enumerated().map { i, m in
+                UsageHistory.Sample(date: t(Double(m)), windows: [caption: base + Double(i) * 4],
+                                    spendCents: spend.map { $0 * Double(i + 1) })
+            }
+        }
+
+        let claude = ProviderView(id: .claude, displayName: "Claude",
+            snapshot: ProviderSnapshot(windows: [
+                UsageWindow(caption: "5-Hour", utilization: 72, resetsAt: now.addingTimeInterval(2 * 3600),
+                            timeBasis: .rollingWindow(length: WindowLength.fiveHour)),
+            ], spend: SpendInfo(usedCents: 12345, apiLimitCents: 50000, label: "Claude extra usage")),
+            lastUpdated: now, history: history("5-Hour", 30, spend: 900))
+        let cursor = ProviderView(id: .cursor, displayName: "Cursor",
+            snapshot: ProviderSnapshot(windows: [
+                UsageWindow(caption: "Weekly", utilization: 40,
+                            resetsAt: now.addingTimeInterval(4 * 24 * 3600 + 19 * 3600),
+                            timeBasis: .rollingWindow(length: WindowLength.sevenDay)),
+            ]),
+            lastUpdated: now, history: history("Weekly", 12))
+
+        let vm = TrayViewModel(providers: [claude, cursor], customLimitCents: 250000)
+        let header = RingsHeaderView(frame: .zero)
+        header.appearance = NSAppearance(named: .darkAqua)
+        header.circles = PieChart.circles(from: vm, now: now)
+        header.setFrameSize(NSSize(width: header.preferredWidth, height: header.preferredHeight))
+
+        guard let rep = header.bitmapImageRepForCachingDisplay(in: header.bounds) else { return }
+        header.cacheDisplay(in: header.bounds, to: rep)
+
+        // Composite over a menu-like dark background so the adaptive text is visible.
+        let out = NSImage(size: header.bounds.size, flipped: false) { rect in
+            NSColor(white: 0.18, alpha: 1).setFill()
+            rect.fill()
+            NSImage(cgImage: rep.cgImage!, size: rect.size).draw(in: rect)
+            return true
+        }
+        guard let tiff = out.tiffRepresentation, let bmp = NSBitmapImageRep(data: tiff),
+              let png = bmp.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: outPath))
         FileHandle.standardError.write(Data("render: wrote \(outPath)\n".utf8))
     }

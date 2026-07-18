@@ -43,9 +43,9 @@ struct UsageWindow: Codable, Equatable {
 }
 
 /// A provider's month-to-date overage / pay-as-you-go spend, in cents. All enabled
-/// providers' `usedCents` are summed into the single combined cost pie.
-/// `apiLimitCents` is the provider-reported cap (informational only — the cost pie
-/// fills against the user's own cost total). `label` names the source in the menu.
+/// providers' `usedCents` are summed into the single combined spend pie.
+/// `apiLimitCents` is the provider-reported cap (informational only — the spend pie
+/// fills against the user's own spend total). `label` names the source in the menu.
 struct SpendInfo: Codable, Equatable {
     var usedCents: Double
     var apiLimitCents: Double?

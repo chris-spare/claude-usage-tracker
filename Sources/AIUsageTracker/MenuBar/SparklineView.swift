@@ -5,29 +5,25 @@ import AppKit
 /// gaps (blank stretches) rather than being stretched across the width. The line
 /// is broken wherever consecutive samples are more than `gapThreshold` apart
 /// (missed samples), so we never draw across data we don't have. Vertical scale is
-/// 0…max (quiet rests on the bottom line, bursts spike up). Kept as a free function
-/// so both the menu view and the debug preview share it.
+/// 0…max (quiet rests on the bottom line, bursts spike up). The line is drawn in
+/// `color`; when `background` is given, a dark panel is filled behind it so the line
+/// reads against the theme's dim tone instead of framing hairlines. Kept as a free
+/// function so both the menu view and the debug preview share it.
 enum Sparkline {
     static func draw(points: [(Date, Double)], window: TimeInterval, now: Date,
-                     in rect: NSRect, color: NSColor, gapThreshold: TimeInterval,
+                     in rect: NSRect, color: NSColor, background: NSColor? = nil,
+                     gapThreshold: TimeInterval,
                      leftInset: CGFloat = 21, rightInset: CGFloat = 16, vInset: CGFloat = 5) {
         let w = rect.width - leftInset - rightInset
         let h = rect.height - 2 * vInset
         guard w > 0, h > 0 else { return }
         let x0 = rect.minX + leftInset
-        let x1 = x0 + w
         let yBottom = rect.minY + vInset
-        let yTop = yBottom + h
 
-        // Faint hairlines framing the range (bottom = zero, top = peak rate), so a
-        // flat/near-flat line is unambiguously placed and the empty axis still reads.
-        color.withAlphaComponent(0.18).setStroke()
-        for y in [yBottom, yTop] {
-            let guideLine = NSBezierPath()
-            guideLine.move(to: NSPoint(x: x0, y: y))
-            guideLine.line(to: NSPoint(x: x1, y: y))
-            guideLine.lineWidth = 0.5
-            guideLine.stroke()
+        // A dark panel behind the line, in the theme's dim tone.
+        if let background {
+            background.setFill()
+            rect.fill()
         }
 
         guard points.count >= 2 else { return }

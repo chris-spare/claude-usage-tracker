@@ -91,11 +91,11 @@ enum Settings {
     private static let customLimitKey = "aiut.customCostTotalCents"
     private static let enabledProvidersKey = "aiut.enabledProviders"
 
-    /// Default combined cost-pie total ($2500). Always set — the cost pie has a
+    /// Default combined spend-pie total ($2500). Always set — the spend pie has a
     /// denominator even before the user customizes it.
     static let defaultCustomLimitCents: Double = 250_000
 
-    /// The dollar total (in cents) the combined cost pie fills against.
+    /// The dollar total (in cents) the combined spend pie fills against.
     static var customLimitCents: Double {
         get { UserDefaults.standard.object(forKey: customLimitKey) as? Double ?? defaultCustomLimitCents }
         set { UserDefaults.standard.set(newValue, forKey: customLimitKey) }

@@ -85,8 +85,8 @@ enum UsageMath {
         return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
     }
 
-    /// Fill fraction (0…1) for the combined cost circle: total spend across providers
-    /// over the user's cost total. The limit always exists (defaults to $2500), so
+    /// Fill fraction (0…1) for the combined spend circle: total spend across providers
+    /// over the user's spend total. The limit always exists (defaults to $2500), so
     /// this is simply used/limit clamped.
     static func spendFraction(usedCents: Double, limitCents: Double) -> Double {
         guard limitCents > 0 else { return 0 }
@@ -109,6 +109,35 @@ enum UsageMath {
             }
         }
         return best
+    }
+
+    /// Unit for a per-minute rate readout — utilization points or dollars.
+    enum RateUnit { case percent, dollars }
+
+    /// "Recent peak: 0.5%/min @ 1:00pm" (or "$0.30/min"), or nil without a positive
+    /// rate in the series. Shown as the sparkline's tooltip.
+    static func recentPeakText(_ points: [(Date, Double)], unit: RateUnit) -> String? {
+        guard let peak = peakRatePerMinute(points) else { return nil }
+        let rate: String
+        switch unit {
+        case .percent: rate = "\(trimmed(peak.perMinute, maxFractionDigits: 2))%"
+        case .dollars: rate = String(format: "$%.2f", peak.perMinute / 100)
+        }
+        return "Recent peak: \(rate)/min @ \(formatClockCompact(peak.at))"
+    }
+
+    /// "Projected 87% at reset" — linear end-of-window extrapolation, or nil when
+    /// there isn't enough signal yet. Shown as the pie's tooltip.
+    static func projectedText(_ window: UsageWindow, now: Date = Date()) -> String? {
+        guard let proj = projectUsage(window, now: now) else { return nil }
+        return "Projected \(Int(proj.rounded()))% at reset"
+    }
+
+    /// Start of the next calendar month — when monthly spend resets. Drives the spend
+    /// pie's reset readout.
+    static func monthResetDate(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) else { return nil }
+        return calendar.date(byAdding: .month, value: 1, to: monthStart)
     }
 
     /// A number with trailing-zero-trimmed decimals (e.g. 0.5000121 → "0.5",

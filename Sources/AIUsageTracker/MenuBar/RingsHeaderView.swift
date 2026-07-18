@@ -2,27 +2,31 @@ import AppKit
 
 /// A dropdown-menu header that shows a large version of the same circles drawn in
 /// the status bar, laid out side by side. Under each ring, top to bottom: a heading
-/// (the provider name, or the dollar value for the cost pie), the caption ("5-Hour",
-/// "Cost", …), a "Usage: n%" line, and a column-width sparkline of that metric's
-/// recent rate. Fed the same `PieChart.Circle` list as the tray image, so the two
-/// always agree. Draws nothing until `circles` is set.
+/// (the provider name, or the dollar value for the spend pie), the caption ("5-Hour",
+/// "Spend", …), "Usage: n%" / "Elapsed: n%" lines, a "Reset: …" countdown, and a
+/// column-width sparkline of that metric's recent rate. Hover tooltips carry the
+/// extra detail: projected usage on the pie, the absolute reset time on the reset
+/// line, and recent peak on the sparkline. Fed the same `PieChart.Circle` list as the
+/// tray image, so the two always agree. Draws nothing until `circles` is set.
 @MainActor
 final class RingsHeaderView: NSView {
     /// The circles to render (in order); text/values/series come from each `Circle`.
     var circles: [PieChart.Circle] = [] {
         didSet {
             setFrameSize(NSSize(width: preferredWidth, height: preferredHeight))
+            rebuildTooltips()
             needsDisplay = true
         }
     }
 
     // Layout (points).
     private let ringDiameter: CGFloat = 42
-    private let columnWidth: CGFloat = 80   // per-circle column (ring + text)
-    /// Inter-column gap scales with column count: the original 18pt at 3 columns down
-    /// to 0 at 5 (packed tight when crowded), linearly interpolated between — so 27pt
-    /// at 2 columns, 9pt at 4. gap(n) = max(0, 45 − 9n).
-    private var columnGap: CGFloat { max(0, 45 - 9 * CGFloat(circles.count)) }
+    private let columnWidth: CGFloat = 96   // per-circle column, wide enough for "Jul 22, 1:55 PM"
+    /// Inter-column gap scales down with column count but never below `minColumnGap`,
+    /// so neighboring columns always keep a clear margin: 27pt at 2 columns, 18 at 3,
+    /// then held at the floor from 4 on. gap(n) = max(minColumnGap, 45 − 9n).
+    private let minColumnGap: CGFloat = 14
+    private var columnGap: CGFloat { max(minColumnGap, 45 - 9 * CGFloat(circles.count)) }
     private let leftMargin: CGFloat = 21    // aligns with the standard menu-text indent
     private let minWidth: CGFloat = 220
     private let topPad: CGFloat = 12
@@ -31,6 +35,7 @@ final class RingsHeaderView: NSView {
     private let captionHeight: CGFloat = 15
     private let lineGap: CGFloat = 3         // between text lines
     private let statHeight: CGFloat = 13
+    private let sparkTopGap: CGFloat = 6     // extra breathing room above the sparkline (~½ a text line)
     private let sparkHeight: CGFloat = 22
     private static let sparkGapThreshold: TimeInterval = 8 * 60
 
@@ -39,17 +44,23 @@ final class RingsHeaderView: NSView {
         return CGFloat(circles.count) * columnWidth + CGFloat(circles.count - 1) * columnGap
     }
     var preferredWidth: CGFloat { max(minWidth, leftMargin + groupWidth + leftMargin) }
+    /// Everything between the ring's bottom and the sparkline's top: heading, caption,
+    /// and the three stat lines (Usage, Elapsed, Reset countdown), each preceded by its
+    /// gap. The reset line is the last text line, so its bottom sits at
+    /// `ringY - textBlockHeight`. Shared by the layout math, the reset tooltip rect,
+    /// and the sparkline placement so they can't drift.
+    private var textBlockHeight: CGFloat {
+        captionGap + headingHeight
+            + lineGap + captionHeight
+            + lineGap + statHeight   // Usage
+            + lineGap + statHeight   // Elapsed
+            + lineGap + statHeight   // Reset countdown
+    }
     var preferredHeight: CGFloat {
-        // ring + heading + caption + Usage + Elapsed + sparkline, with gaps between.
-        topPad + ringDiameter + captionGap + headingHeight + lineGap + captionHeight
-            + lineGap + statHeight + lineGap + statHeight + lineGap + sparkHeight + bottomPad
+        topPad + ringDiameter + textBlockHeight + sparkTopGap + sparkHeight + bottomPad
     }
     private let bottomPad: CGFloat = 8
 
-    private static let headingAttrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
-        .foregroundColor: NSColor.secondaryLabelColor,
-    ]
     private static let captionAttrs: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
         .foregroundColor: NSColor.labelColor,
@@ -61,18 +72,22 @@ final class RingsHeaderView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard !circles.isEmpty else { return }
-        let ringY = bounds.height - topPad - ringDiameter
+        let now = Date()
 
         for (i, circle) in circles.enumerated() {
             let colX = leftMargin + CGFloat(i) * (columnWidth + columnGap)
-            let ringRect = NSRect(x: colX + (columnWidth - ringDiameter) / 2, y: ringY,
-                                  width: ringDiameter, height: ringDiameter)
-            PieChart.draw(circle, in: ringRect)
+            let rects = columnRects(index: i)
+            PieChart.draw(circle, in: rects.ring)
 
             // Text lines, top-down, each centered in the column.
-            var y = ringY - captionGap - headingHeight
+            var y = rects.ring.minY - captionGap - headingHeight
             if let heading = circle.heading {
-                drawLine(heading, attrs: Self.headingAttrs, columnX: colX, bottomY: y, height: headingHeight)
+                // Bold, in the pie's highlight color, to tie the column to its ring.
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
+                    .foregroundColor: circle.usageColor,
+                ]
+                drawLine(heading, attrs: attrs, columnX: colX, bottomY: y, height: headingHeight)
             }
             y -= lineGap + captionHeight
             drawLine(circle.caption, attrs: Self.captionAttrs, columnX: colX, bottomY: y, height: captionHeight)
@@ -82,16 +97,77 @@ final class RingsHeaderView: NSView {
             drawLine("Usage: \(pct(usage))%", attrs: Self.statAttrs, columnX: colX, bottomY: y, height: statHeight)
             y -= lineGap + statHeight
             drawLine("Elapsed: \(pct(time))%", attrs: Self.statAttrs, columnX: colX, bottomY: y, height: statHeight)
+            y -= lineGap + statHeight
+            drawLine(resetCountdown(circle.resetsAt, now: now), attrs: Self.statAttrs,
+                     columnX: colX, bottomY: y, height: statHeight)
+
             // Column-width sparkline of the recent usage rate, below the stats.
             // Only drawn once there are ≥2 points (else it'd be an empty axis).
             guard circle.spark.count >= 2 else { continue }
-            y -= lineGap + sparkHeight
-            let sparkRect = NSRect(x: colX, y: y, width: columnWidth, height: sparkHeight)
             Sparkline.draw(points: UsageMath.usageRatePoints(circle.spark),
-                           window: UsageHistory.sparklineWindow, now: Date(),
-                           in: sparkRect, color: .labelColor, gapThreshold: Self.sparkGapThreshold,
+                           window: UsageHistory.sparklineWindow, now: now,
+                           in: rects.spark, color: circle.usageColor,
+                           background: .black,
+                           gapThreshold: Self.sparkGapThreshold,
                            leftInset: 2, rightInset: 2, vInset: 3)
         }
+    }
+
+    /// The ring, reset-line, and sparkline frames for column `i`, derived purely from
+    /// the fixed layout so `draw` and `rebuildTooltips` place hover targets identically.
+    private func columnRects(index i: Int) -> (ring: NSRect, reset: NSRect, spark: NSRect) {
+        let ringY = bounds.height - topPad - ringDiameter
+        let colX = leftMargin + CGFloat(i) * (columnWidth + columnGap)
+        let ring = NSRect(x: colX + (columnWidth - ringDiameter) / 2, y: ringY,
+                          width: ringDiameter, height: ringDiameter)
+        let reset = NSRect(x: colX, y: ringY - textBlockHeight, width: columnWidth, height: statHeight)
+        let spark = NSRect(x: colX, y: ringY - textBlockHeight - sparkTopGap - sparkHeight,
+                           width: columnWidth, height: sparkHeight)
+        return (ring, reset, spark)
+    }
+
+    /// Live tooltip text keyed by the tag `addToolTip` returns. `addToolTip` does not
+    /// retain its owner, so the strings must live here (owned by the view) rather than
+    /// being passed as a temporary NSString — otherwise the owner is freed and AppKit
+    /// messages a dangling pointer on hover.
+    private var toolTipStrings: [NSView.ToolTipTag: String] = [:]
+
+    /// Hover tooltips for each column's pie (projected usage), reset line (absolute
+    /// reset time), and sparkline (recent peak). Rebuilt whenever `circles` changes.
+    private func rebuildTooltips() {
+        removeAllToolTips()
+        toolTipStrings.removeAll()
+        guard !circles.isEmpty, bounds.height > 0 else { return }
+        for (i, circle) in circles.enumerated() {
+            guard case .pie = circle.kind else { continue }
+            let rects = columnRects(index: i)
+            addToolTip(circle.pieTooltip, in: rects.ring)
+            addToolTip(resetTooltip(circle.resetsAt), in: rects.reset)
+            if circle.spark.count >= 2 { addToolTip(circle.sparkTooltip, in: rects.spark) }
+        }
+    }
+
+    /// Register one tooltip rect, owned by this view (see `toolTipStrings`). No-op when
+    /// there's no text to show.
+    private func addToolTip(_ text: String?, in rect: NSRect) {
+        guard let text else { return }
+        let tag = addToolTip(rect, owner: self, userData: nil)
+        toolTipStrings[tag] = text
+    }
+
+    /// A column's live reset countdown ("Reset: 4d 19h"). An idle window (no reset
+    /// yet) reads as "Reset: —"; one already past reads as "Reset: soon".
+    private func resetCountdown(_ resetsAt: Date?, now: Date) -> String {
+        guard let resetsAt else { return "Reset: —" }
+        if resetsAt.timeIntervalSince(now) <= 0 { return "Reset: soon" }
+        return "Reset: \(UsageMath.formatDelta(to: resetsAt, now: now))"
+    }
+
+    /// The reset line's hover text — the absolute reset time ("Resets Jul 22, 2:00 PM"),
+    /// or nil for an idle/elapsed window (nothing meaningful to show).
+    private func resetTooltip(_ resetsAt: Date?) -> String? {
+        guard let resetsAt, resetsAt.timeIntervalSince(Date()) > 0 else { return nil }
+        return "Resets \(UsageMath.formatResetTime(resetsAt, now: Date()))"
     }
 
     private func pct(_ fraction: Double) -> Int { Int((fraction * 100).rounded()) }
@@ -102,5 +178,12 @@ final class RingsHeaderView: NSView {
         let size = str.size(withAttributes: attrs)
         str.draw(at: NSPoint(x: x + (columnWidth - size.width) / 2, y: bottomY + (height - size.height) / 2),
                  withAttributes: attrs)
+    }
+}
+
+extension RingsHeaderView: NSViewToolTipOwner {
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag,
+              point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        toolTipStrings[tag] ?? ""
     }
 }

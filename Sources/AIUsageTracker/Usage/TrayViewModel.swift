@@ -24,7 +24,7 @@ struct ProviderView {
     }
 }
 
-/// The whole tray's state: the ordered enabled providers plus the single cost total
+/// The whole tray's state: the ordered enabled providers plus the single spend total
 /// the combined spend pie fills against. Shared source of truth for the tray image,
 /// the dropdown header rings, and the menu sections.
 struct TrayViewModel {
@@ -36,7 +36,7 @@ struct TrayViewModel {
         providers.compactMap { $0.snapshot?.spend?.usedCents }.reduce(0, +)
     }
 
-    /// Whether any enabled provider reports spend at all (gates the cost pie).
+    /// Whether any enabled provider reports spend at all (gates the spend pie).
     var hasAnySpend: Bool {
         providers.contains { $0.snapshot?.spend != nil }
     }
@@ -46,7 +46,7 @@ struct TrayViewModel {
         providers.compactMap { $0.lastUpdated }.max()
     }
 
-    /// Combined cumulative spend (cents) over time, for the cost sparkline / peak.
+    /// Combined cumulative spend (cents) over time, for the spend sparkline / peak.
     ///
     /// Providers sample at different (often sub-second-apart) instants, so naively
     /// summing by timestamp yields a jagged series whose per-minute rate explodes on

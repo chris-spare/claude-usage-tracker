@@ -3,7 +3,7 @@ import AppKit
 /// Renders usage into circles composited side by side into the single status-item
 /// image, one image shared with the dropdown header via the `Circle` list. Each
 /// provider contributes its window pies (or a single warning glyph when its last
-/// fetch failed), in `ProviderID` order, followed by the combined cost pie.
+/// fetch failed), in `ProviderID` order, followed by the combined spend pie.
 ///
 /// Each pie draws two independent layers, both filling clockwise from 12 o'clock:
 ///   1. a black disc (the empty remainder),
@@ -11,12 +11,12 @@ import AppKit
 ///   3. the "usage" layer as a ring [0 … usage] in the outer lane, over the wedge,
 ///   4. a thin hairline outline.
 /// Colors come from the per-provider palette (usage ring + darkened time wedge);
-/// the cost pie keeps a white ring over a gray wedge.
+/// the spend pie keeps a white ring over a gray wedge.
 enum PieChart {
-    /// A provider's (or the cost pie's) two colors.
+    /// A provider's (or the spend pie's) two colors.
     struct Palette { let usage: NSColor; let time: NSColor }
 
-    /// Per-provider palette: usage ring in the brand color, time wedge at half
+    /// Per-provider palette: usage ring in the brand color, time wedge at 60%
     /// brightness. Claude #D97757, Codex #3D93D6, Cursor #AC7CE0.
     static func palette(for id: ProviderID) -> Palette {
         switch id {
@@ -25,12 +25,12 @@ enum PieChart {
         case .cursor: return make(172, 124, 224)
         }
     }
-    /// Combined cost pie: white usage ring over a gray time wedge.
-    static let costPalette = Palette(usage: .white, time: NSColor(white: 0.5, alpha: 1))
+    /// Combined spend pie: white usage ring over a gray time wedge.
+    static let spendPalette = Palette(usage: .white, time: NSColor(white: 0.6, alpha: 1))
 
     private static func make(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> Palette {
         Palette(usage: NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1),
-                time: NSColor(srgbRed: r / 255 * 0.5, green: g / 255 * 0.5, blue: b / 255 * 0.5, alpha: 1))
+                time: NSColor(srgbRed: r / 255 * 0.6, green: g / 255 * 0.6, blue: b / 255 * 0.6, alpha: 1))
     }
 
     // Untouched remainder — black.
@@ -42,8 +42,9 @@ enum PieChart {
     static let diameter: CGFloat = 15
     static let gap: CGFloat = 5
     static let outlineWidth: CGFloat = 0.5
-    /// Inner edge of the usage ring, as a fraction of the pie radius.
-    static let ringInnerRatio: CGFloat = 0.67
+    /// Inner edge of the usage ring, as a fraction of the pie radius (so the ring band
+    /// is the outer 1/5 of the radius).
+    static let ringInnerRatio: CGFloat = 0.8
 
     static func size(circles: Int) -> NSSize {
         let n = max(1, circles)   // always at least one slot so the tray item is clickable
@@ -60,7 +61,7 @@ enum PieChart {
         }
         var kind: Kind
         /// Optional line drawn above the caption in the dropdown header: the provider
-        /// name for a window/error circle, or the dollar value for the cost circle.
+        /// name for a window/error circle, or the dollar value for the spend circle.
         /// Unused by the tray image.
         var heading: String?
         var caption: String
@@ -69,20 +70,31 @@ enum PieChart {
         /// Cumulative series (utilization % or spend cents, oldest first) feeding the
         /// per-column sparkline in the dropdown header. Unused by the tray image.
         var spark: [(Date, Double)]
+        /// When this window/pie next resets (nil for an idle window). Drives the
+        /// header column's "Reset: …" lines, computed live against the clock.
+        var resetsAt: Date?
+        /// Hover text for the pie (projected end-of-window usage) and the sparkline
+        /// (recent peak rate), or nil when there isn't enough signal. Header-only.
+        var pieTooltip: String?
+        var sparkTooltip: String?
 
         init(kind: Kind, heading: String? = nil, caption: String,
-             usageColor: NSColor, timeColor: NSColor, spark: [(Date, Double)] = []) {
+             usageColor: NSColor, timeColor: NSColor, spark: [(Date, Double)] = [],
+             resetsAt: Date? = nil, pieTooltip: String? = nil, sparkTooltip: String? = nil) {
             self.kind = kind
             self.heading = heading
             self.caption = caption
             self.usageColor = usageColor
             self.timeColor = timeColor
             self.spark = spark
+            self.resetsAt = resetsAt
+            self.pieTooltip = pieTooltip
+            self.sparkTooltip = sparkTooltip
         }
     }
 
     /// The ordered circles for a tray view model: each enabled provider's window
-    /// pies (or one warning glyph if it errored), then the combined cost pie when any
+    /// pies (or one warning glyph if it errored), then the combined spend pie when any
     /// provider reports spend. A provider that hasn't fetched yet contributes nothing.
     ///
     /// Each window's time wedge is computed at *that provider's* last-fetch moment
@@ -98,12 +110,16 @@ enum PieChart {
             } else if let snap = p.snapshot {
                 let at = p.lastUpdated ?? now
                 for w in snap.windows {
+                    let series = p.series(forWindow: w.caption)
                     out.append(Circle(
                         kind: .pie(time: UsageMath.timeFraction(w.timeBasis, resetsAt: w.resetsAt, now: at),
                                    usage: UsageMath.usageFraction(utilization: w.utilization)),
                         heading: p.displayName, caption: w.caption,
                         usageColor: pal.usage, timeColor: pal.time,
-                        spark: p.series(forWindow: w.caption)))
+                        spark: series,
+                        resetsAt: w.resetsAt,
+                        pieTooltip: UsageMath.projectedText(w, now: at),
+                        sparkTooltip: UsageMath.recentPeakText(series, unit: .percent)))
                 }
             }
         }
@@ -112,9 +128,11 @@ enum PieChart {
                 kind: .pie(time: UsageMath.monthTimeFraction(now: vm.latestUpdate ?? now),
                            usage: UsageMath.spendFraction(usedCents: vm.combinedSpendCents,
                                                           limitCents: vm.customLimitCents)),
-                heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Cost",
-                usageColor: costPalette.usage, timeColor: costPalette.time,
-                spark: vm.spendSeries))
+                heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Spend",
+                usageColor: spendPalette.usage, timeColor: spendPalette.time,
+                spark: vm.spendSeries,
+                resetsAt: UsageMath.monthResetDate(now: now),
+                sparkTooltip: UsageMath.recentPeakText(vm.spendSeries, unit: .dollars)))
         }
         return out
     }
@@ -127,7 +145,7 @@ enum PieChart {
     static func image(circles: [Circle]) -> NSImage {
         // With nothing enabled/fetched, draw a single empty ring so the item stays visible.
         let drawn = circles.isEmpty
-            ? [Circle(kind: .pie(time: 0, usage: 0), caption: "", usageColor: costPalette.usage, timeColor: costPalette.time)]
+            ? [Circle(kind: .pie(time: 0, usage: 0), caption: "", usageColor: spendPalette.usage, timeColor: spendPalette.time)]
             : circles
         let size = size(circles: drawn.count)
         let image = NSImage(size: size, flipped: false) { _ in

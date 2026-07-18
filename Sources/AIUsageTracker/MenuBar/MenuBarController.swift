@@ -2,9 +2,9 @@ import AppKit
 
 /// Owns the menu-bar status item (the donut charts) and the details dropdown. The
 /// menu is rebuilt from the current `TrayViewModel`: an app title, the big rings
-/// header, one section per enabled provider (its windows, or an error + Copy Error
-/// when its last fetch failed), a combined cost section, then the footer (Providers
-/// submenu, updated line, Open at Login / Refresh / Restart / Quit).
+/// header (which now carries all the per-window detail), a status line only for
+/// providers that errored or haven't fetched, a combined spend section, then the
+/// footer (Providers submenu, updated line, Open at Login / Refresh / Restart / Quit).
 ///
 /// The tray image and header render the **snapshot as of each provider's last
 /// fetch** (see `PieChart.circles`), so the time arc isn't misrepresented by drift;
@@ -87,25 +87,22 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         for p in vm.providers {
-            addProviderSection(p, now: now)
-            menu.addItem(.separator())
+            if addProviderStatus(p) { menu.addItem(.separator()) }
         }
 
-        if vm.hasAnySpend { addCostSection(); menu.addItem(.separator()) }
+        if vm.hasAnySpend { addSpendSection(); menu.addItem(.separator()) }
 
         addFooter(now: now)
     }
 
-    /// One provider's section: a colored title, then either its window rows or an
-    /// error line + a Copy Error action.
-    private func addProviderSection(_ p: ProviderView, now: Date) {
-        let titleItem = Self.disabledItem(p.displayName)
-        titleItem.attributedTitle = NSAttributedString(string: p.displayName, attributes: [
-            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
-            .foregroundColor: PieChart.palette(for: p.id).usage])
-        menu.addItem(titleItem)
-
+    /// A status line for a provider that isn't drawing healthy columns — an error
+    /// (message + Copy Error), "No data yet", or a plan with no usage window. Healthy
+    /// providers show nothing here (all their detail lives in the rings header).
+    /// Returns whether anything was added (so the caller can place a separator).
+    @discardableResult
+    private func addProviderStatus(_ p: ProviderView) -> Bool {
         if let error = p.error {
+            addProviderTitle(p)
             let msg = Self.disabledItem(error)
             msg.attributedTitle = NSAttributedString(string: error, attributes: [
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
@@ -115,37 +112,37 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             copy.target = self
             copy.representedObject = error
             menu.addItem(copy)
-            return
+            return true
         }
-
         guard let snap = p.snapshot else {
+            addProviderTitle(p)
             menu.addItem(Self.disabledItem("No data yet"))   // enabled, not fetched yet
-            return
+            return true
         }
         guard !snap.windows.isEmpty else {
             // Fetched fine, but this plan exposes no rate-limit window (e.g. a
             // usage-based account) — so there's no circle to draw for it.
+            addProviderTitle(p)
             menu.addItem(Self.disabledItem("No usage window on this plan"))
-            return
+            return true
         }
-
-        let at = p.lastUpdated ?? now   // usage/projection are as of the last fetch
-        for window in snap.windows {
-            let caption = Self.disabledItem(window.caption)
-            caption.attributedTitle = NSAttributedString(string: window.caption, attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)])
-            menu.addItem(caption)
-            menu.addItem(Self.disabledItem(usageLine(window, at: at)))
-            menu.addItem(Self.disabledItem(resetLine(window, now: now)))
-            addRecentPeak(points: p.series(forWindow: window.caption), unit: .percent)
-        }
+        return false   // healthy — everything's in the rings header columns
     }
 
-    /// The combined cost section: total spend, per-provider breakdown, cost total,
-    /// and "Set Custom Cost Total…".
-    private func addCostSection() {
-        let title = Self.disabledItem("Cost (Month-to-Date)")
-        title.attributedTitle = NSAttributedString(string: "Cost (Month-to-Date)", attributes: [
+    /// The provider's name as a colored, bold section title.
+    private func addProviderTitle(_ p: ProviderView) {
+        let titleItem = Self.disabledItem(p.displayName)
+        titleItem.attributedTitle = NSAttributedString(string: p.displayName, attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
+            .foregroundColor: PieChart.palette(for: p.id).usage])
+        menu.addItem(titleItem)
+    }
+
+    /// The combined spend section: total spend, per-provider breakdown, the spend
+    /// total, and "Set Custom Spend Total…".
+    private func addSpendSection() {
+        let title = Self.disabledItem("Spend (Month-to-Date)")
+        title.attributedTitle = NSAttributedString(string: "Spend (Month-to-Date)", attributes: [
             .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold)])
         menu.addItem(title)
 
@@ -159,9 +156,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 menu.addItem(Self.disabledItem("  \(spend.label): \(UsageMath.formatDollars(spend.usedCents))"))
             }
         }
-        addRecentPeak(points: vm.spendSeries, unit: .dollars)
 
-        let setLimit = NSMenuItem(title: "Set Custom Cost Total…", action: #selector(setCustomLimit), keyEquivalent: "")
+        let setLimit = NSMenuItem(title: "Set Custom Spend Total…", action: #selector(setCustomLimit), keyEquivalent: "")
         setLimit.target = self
         menu.addItem(setLimit)
     }
@@ -203,39 +199,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
-    // MARK: - Row text
-
-    private func usageLine(_ window: UsageWindow, at: Date) -> String {
-        let pct = Int(window.utilization.rounded())
-        if let proj = UsageMath.projectUsage(window, now: at) {
-            return "\(pct)% used  ·  projected \(Int(proj.rounded()))%"
-        }
-        return "\(pct)% used"
-    }
-
-    private func resetLine(_ window: UsageWindow, now: Date) -> String {
-        guard let resetsAt = window.resetsAt else { return "Not started — resets once used" }
-        if resetsAt.timeIntervalSince(now) <= 0 { return "Resets soon" }
-        return "Resets \(UsageMath.formatResetTime(resetsAt, now: now))  ·  in \(UsageMath.formatDelta(to: resetsAt, now: now))"
-    }
-
-    private enum RateUnit { case percent, dollars }
-
-    /// Add a recent-peak line for a cumulative series (the sparkline itself now lives
-    /// in the header column). No-op without enough points for a rate.
-    private func addRecentPeak(points: [(Date, Double)], unit: RateUnit) {
-        guard let peak = UsageMath.peakRatePerMinute(points) else { return }
-        menu.addItem(Self.disabledItem(
-            "Recent peak: \(formatRate(peak.perMinute, unit: unit))/min @ \(UsageMath.formatClockCompact(peak.at))"))
-    }
-
-    private func formatRate(_ perMinute: Double, unit: RateUnit) -> String {
-        switch unit {
-        case .percent: return "\(UsageMath.trimmed(perMinute, maxFractionDigits: 2))%"
-        case .dollars: return String(format: "$%.2f", perMinute / 100)
-        }
-    }
-
     // MARK: - Actions
 
     @objc private func refresh() { onRefresh?() }
@@ -254,11 +217,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         Log.log("copied error to clipboard")
     }
 
-    /// Prompt for the combined cost total (a dollar amount), persist it, and repaint.
+    /// Prompt for the combined spend total (a dollar amount), persist it, and repaint.
     @objc private func setCustomLimit() {
         let alert = NSAlert()
-        alert.messageText = "Set Custom Cost Total"
-        alert.informativeText = "Enter the dollar amount the combined cost pie fills against."
+        alert.messageText = "Set Custom Spend Total"
+        alert.informativeText = "Enter the dollar amount the combined spend pie fills against."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         field.stringValue = String(format: "%.2f", vm.customLimitCents / 100)
         field.placeholderString = "e.g. 2500.00"
@@ -283,7 +246,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         Settings.customLimitCents = (dollars * 100).rounded()
         vm.customLimitCents = Settings.customLimitCents
-        Log.log("cost: custom total set to \(UsageMath.formatDollars(Settings.customLimitCents))")
+        Log.log("spend: custom total set to \(UsageMath.formatDollars(Settings.customLimitCents))")
         rebuildMenu(now: Date())
         redraw(now: Date())
     }

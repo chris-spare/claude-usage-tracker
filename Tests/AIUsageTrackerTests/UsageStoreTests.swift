@@ -53,9 +53,9 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertNil(reopened.lastFetchAt(.cursor))
     }
 
-    /// The cost total defaults to $2500 when unset.
-    func testDefaultCostTotal() {
-        let key = "aiut.customCostTotalCents"
+    /// The spend total defaults to $2500 when unset.
+    func testDefaultSpendTotal() {
+        let key = "aiut.customCostTotalCents"   // persistence key kept for back-compat
         let saved = UserDefaults.standard.object(forKey: key)
         defer {
             if let saved { UserDefaults.standard.set(saved, forKey: key) }

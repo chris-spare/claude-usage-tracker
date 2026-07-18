@@ -1,5 +1,5 @@
 import XCTest
-@testable import AIUsageTracker
+@testable import AISpendTracker
 
 final class CursorUsageFetcherTests: XCTestCase {
     /// A real enterprise payload → one monthly window (utilization is the already-%

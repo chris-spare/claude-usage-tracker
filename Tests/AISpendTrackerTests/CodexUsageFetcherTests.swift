@@ -1,5 +1,5 @@
 import XCTest
-@testable import AIUsageTracker
+@testable import AISpendTracker
 
 final class CodexUsageFetcherTests: XCTestCase {
     /// Free plan: a single ~30-day primary window, no secondary, no overage.

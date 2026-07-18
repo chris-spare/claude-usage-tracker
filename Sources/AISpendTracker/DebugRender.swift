@@ -1,6 +1,6 @@
 import AppKit
 
-/// Dev-only: `AIUsageTracker --render <out.png>` draws a grid of pie scenarios at
+/// Dev-only: `AISpendTracker --render <out.png>` draws a grid of pie scenarios at
 /// large scale (so the arcs are eyeball-verifiable) plus a menu-bar-size preview,
 /// writes a PNG, and exits. Not used by the running app.
 enum DebugRender {
@@ -10,7 +10,7 @@ enum DebugRender {
         ("time leads usage", 0.60, 0.45),
         ("usage leads time", 0.30, 0.50),
         ("equal", 0.50, 0.50),
-        ("usage over 100%", 0.30, 1.0),
+        ("usage over 100%", 0.30, 1.13),
         ("nearly full time", 0.95, 0.80),
         ("tiny sliver time", 0.03, 0.0),
         ("full both", 1.0, 1.0),
@@ -93,6 +93,21 @@ enum DebugRender {
                            gapThreshold: 8 * 60, leftInset: 6, rightInset: 6)
             drawLabel("usage-rate sparkline (fixed 2h axis, gaps left blank)",
                       centeredIn: NSRect(x: 40, y: height - 78, width: 360, height: 20))
+
+            // Light-mode tray check: the same pies with a black hairline over a light
+            // bar, so the adaptive outline reads next to the dark-backed trays above.
+            let lightBar = NSRect(x: 440, y: height - 66, width: 300, height: 40)
+            NSColor(white: 0.92, alpha: 1).setFill()
+            NSBezierPath(roundedRect: lightBar, xRadius: 6, yRadius: 6).fill()
+            let lightTray = PieChart.trayImage(from: TrayViewModel(providers: [claude], customLimitCents: 250000),
+                                               now: now0, outline: PieChart.outline(forDark: false))
+            let ls: CGFloat = 3
+            lightTray.draw(in: NSRect(x: lightBar.minX + 10,
+                                      y: lightBar.minY + (lightBar.height - lightTray.size.height * ls) / 2,
+                                      width: lightTray.size.width * ls, height: lightTray.size.height * ls),
+                           from: .zero, operation: .sourceOver, fraction: 1)
+            drawLabel("light-mode tray (black hairline)",
+                      centeredIn: NSRect(x: 440, y: height - 86, width: 300, height: 20))
             return true
         }
 
@@ -123,7 +138,7 @@ enum DebugRender {
 
         let claude = ProviderView(id: .claude, displayName: "Claude",
             snapshot: ProviderSnapshot(windows: [
-                UsageWindow(caption: "5-Hour", utilization: 100, resetsAt: now.addingTimeInterval(2 * 3600),
+                UsageWindow(caption: "5-Hour", utilization: 113, resetsAt: now.addingTimeInterval(2 * 3600),
                             timeBasis: .rollingWindow(length: WindowLength.fiveHour)),
             ], spend: SpendInfo(usedCents: 12345, apiLimitCents: 50000, label: "Claude extra usage")),
             lastUpdated: now, history: history("5-Hour", 30, spend: 900))
@@ -135,7 +150,9 @@ enum DebugRender {
             ]),
             lastUpdated: now, history: history("Weekly", 12))
 
-        let vm = TrayViewModel(providers: [claude, cursor], customLimitCents: 250000)
+        // A low spend total so the combined spend pie reads over 100% (capped ring +
+        // maxed dot, with the true percentage still shown in text).
+        let vm = TrayViewModel(providers: [claude, cursor], customLimitCents: 10000)
 
         // Render both themes over a menu-like background, so light mode (adaptive text,
         // black pie rims) is verifiable alongside dark.

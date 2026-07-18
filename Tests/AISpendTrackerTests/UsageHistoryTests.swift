@@ -1,5 +1,5 @@
 import XCTest
-@testable import AIUsageTracker
+@testable import AISpendTracker
 
 @MainActor
 final class UsageHistoryTests: XCTestCase {
@@ -51,33 +51,5 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(samples.count, 1)
         XCTAssertEqual(samples.first?.spendCents, 24955)
         XCTAssertEqual(samples.first?.windows["7-Day"], 55)
-    }
-
-    /// The old Claude-only JSONL (fiveHourUtil/sevenDayUtil/spendCents) migrates into
-    /// the generalized per-window shape, and the legacy file is retired.
-    func testMigratesLegacyClaudeFormat() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let legacy = dir.appendingPathComponent("history.jsonl")
-        let newURL = dir.appendingPathComponent("history-claude.jsonl")
-
-        struct OldRow: Codable { var date: Date; var fiveHourUtil: Double?; var sevenDayUtil: Double?; var spendCents: Double? }
-        let now = Date(timeIntervalSince1970: 2_000_000_000)
-        let rows = [
-            OldRow(date: now.addingTimeInterval(-60 * 60), fiveHourUtil: 42, sevenDayUtil: 55, spendCents: 100),
-            OldRow(date: now.addingTimeInterval(-30 * 60), fiveHourUtil: 43, sevenDayUtil: 56, spendCents: 120),
-        ]
-        let enc = JSONEncoder()
-        let body = rows.map { String(decoding: try! enc.encode($0), as: UTF8.self) }.joined(separator: "\n") + "\n"
-        try body.write(to: legacy, atomically: true, encoding: .utf8)
-
-        let h = UsageHistory(fileURL: newURL, legacySources: [legacy])
-        XCTAssertEqual(h.samples.count, 2)
-        XCTAssertEqual(h.samples.first?.windows["5-Hour"], 42)
-        XCTAssertEqual(h.samples.first?.windows["7-Day"], 55)
-        XCTAssertEqual(h.samples.last?.spendCents, 120)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: newURL.path))       // migrated into new file
-        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))      // legacy retired
     }
 }

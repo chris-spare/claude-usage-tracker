@@ -1,6 +1,6 @@
 import Foundation
 
-/// Minimal append-only file logger at ~/Library/Logs/AIUsageTracker.log, so we
+/// Minimal append-only file logger at ~/Library/Logs/AISpendTracker.log, so we
 /// can diagnose the real menu-bar app (whose stdout is otherwise buried). Also
 /// mirrors to stderr for `swift run`.
 enum Log {

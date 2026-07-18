@@ -32,10 +32,10 @@ enum UsageMath {
         return clamp01(elapsed / total)
     }
 
-    /// Usage layer fraction (utilization is a 0…100 percentage), clamped to 0…1
-    /// for drawing. The raw utilization is used for text so it can read ≥100.
+    /// Usage layer fraction (utilization is a 0…100 percentage) where 1.0 == 100%.
+    /// Not clamped above 1 — it can read ≥100% in text; the pie clamps it for drawing.
     static func usageFraction(utilization: Double) -> Double {
-        clamp01(utilization / 100)
+        max(0, utilization / 100)
     }
 
     /// Minimum elapsed time before we show a projection (avoids wild early swings).
@@ -85,12 +85,12 @@ enum UsageMath {
         return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
     }
 
-    /// Fill fraction (0…1) for the combined spend circle: total spend across providers
-    /// over the user's spend total. The limit always exists (defaults to $2500), so
-    /// this is simply used/limit clamped.
+    /// Fraction for the combined spend circle where 1.0 == 100%: total spend across
+    /// providers over the user's spend total (always set, defaulting to $2500). Not
+    /// clamped above 1 — it can read ≥100% in text; the pie clamps it for drawing.
     static func spendFraction(usedCents: Double, limitCents: Double) -> Double {
         guard limitCents > 0 else { return 0 }
-        return clamp01(usedCents / limitCents)
+        return max(0, usedCents / limitCents)
     }
 
     /// Highest per-minute consumption rate across a cumulative series, and when it

@@ -26,14 +26,6 @@ final class UsageHistory {
         }
     }
 
-    /// Old Claude-only row shape, migrated on first load into the generalized form.
-    private struct LegacySample: Codable {
-        var date: Date
-        var fiveHourUtil: Double?
-        var sevenDayUtil: Double?
-        var spendCents: Double?
-    }
-
     /// Default sparkline display window (independent of on-disk retention).
     static let sparklineWindow: TimeInterval = 2 * 60 * 60
 
@@ -42,25 +34,17 @@ final class UsageHistory {
 
     private(set) var samples: [Sample] = []
     private let fileURL: URL
-    /// Old files to migrate from if the per-provider file doesn't exist yet
-    /// (Claude only: the pre-multi-provider `history.jsonl` / legacy `history.json`).
-    private let legacySources: [URL]
 
     /// Production: one file per provider under Application Support.
     convenience init(providerID: ProviderID, retention: TimeInterval = 30 * 24 * 60 * 60) {
-        let dir = AppPaths.applicationSupport
-        let url = dir.appendingPathComponent("history-\(providerID.rawValue).jsonl")
-        let legacy = providerID == .claude
-            ? [dir.appendingPathComponent("history.jsonl"), dir.appendingPathComponent("history.json")]
-            : []
-        self.init(fileURL: url, retention: retention, legacySources: legacy)
+        let url = AppPaths.applicationSupport.appendingPathComponent("history-\(providerID.rawValue).jsonl")
+        self.init(fileURL: url, retention: retention)
     }
 
-    /// Test-friendly: explicit file (and optional legacy sources to exercise migration).
-    init(fileURL: URL, retention: TimeInterval = 30 * 24 * 60 * 60, legacySources: [URL] = []) {
+    /// Test-friendly: explicit file.
+    init(fileURL: URL, retention: TimeInterval = 30 * 24 * 60 * 60) {
         self.fileURL = fileURL
         self.retention = retention
-        self.legacySources = legacySources
         load()
     }
 
@@ -91,55 +75,16 @@ final class UsageHistory {
     private func load() {
         if let raw = try? String(contentsOf: fileURL, encoding: .utf8), !raw.isEmpty {
             samples = Self.decodeJSONL(raw)
-        } else if let migrated = migrateLegacy() {
-            samples = migrated
-            rewrite()   // write the migrated data into the per-provider file
         }
         prune(now: Date())
         rewrite()   // compact on launch
     }
 
-    /// Migrate the first present legacy source (new-format JSONL, old-format JSONL, or
-    /// the oldest JSON array), converting old Claude rows to the generalized shape.
-    private func migrateLegacy() -> [Sample]? {
-        for url in legacySources {
-            guard let raw = try? Data(contentsOf: url) else { continue }
-            let text = String(decoding: raw, as: UTF8.self)
-            let samples: [Sample]
-            if let arr = try? JSONDecoder().decode([Sample].self, from: raw) {
-                samples = arr                               // legacy JSON array, new shape
-            } else if let legacyArr = try? JSONDecoder().decode([LegacySample].self, from: raw) {
-                samples = legacyArr.map(Self.convert)       // legacy JSON array, old shape
-            } else {
-                samples = Self.decodeJSONL(text)            // JSONL (new or old shape per line)
-            }
-            try? FileManager.default.removeItem(at: url)
-            if !samples.isEmpty { return samples }
-        }
-        return nil
-    }
-
-    /// Decode JSONL, tolerating both the new `Sample` shape and the old Claude shape
-    /// on a per-line basis.
     private static func decodeJSONL(_ raw: String) -> [Sample] {
         let decoder = JSONDecoder()
         return raw.split(separator: "\n").compactMap { line in
-            let data = Data(line.utf8)
-            if let s = try? decoder.decode(Sample.self, from: data), !s.windows.isEmpty || s.spendCents != nil {
-                return s
-            }
-            if let legacy = try? decoder.decode(LegacySample.self, from: data) {
-                return convert(legacy)
-            }
-            return try? decoder.decode(Sample.self, from: data)   // empty-but-valid new row
+            try? decoder.decode(Sample.self, from: Data(line.utf8))
         }
-    }
-
-    private static func convert(_ legacy: LegacySample) -> Sample {
-        var windows: [String: Double] = [:]
-        if let v = legacy.fiveHourUtil { windows["5-Hour"] = v }
-        if let v = legacy.sevenDayUtil { windows["7-Day"] = v }
-        return Sample(date: legacy.date, windows: windows, spendCents: legacy.spendCents)
     }
 
     private func append(_ sample: Sample) {

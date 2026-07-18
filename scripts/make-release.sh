@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a distributable, notarized "AI Usage Tracker.app".
+# Build a distributable, notarized "AI Spend Tracker.app".
 #
 # Produces a UNIVERSAL binary (arm64 + x86_64) so it runs on both Apple Silicon
 # and Intel Macs, targets macOS 13 (Ventura) as the floor, signs with a
@@ -14,19 +14,19 @@
 #          --apple-id <you@example.com> --team-id 7H2524M5TN \
 #          --password <app-specific-password>
 #
-# Output: build/AI Usage Tracker.app  and  build/AIUsageTracker.zip (the artifact to
+# Output: build/AI Spend Tracker.app  and  build/AISpendTracker.zip (the artifact to
 # attach to a GitHub Release).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 NOTARY_PROFILE="${NOTARY_PROFILE:-claude-usage-notary}"
-BUNDLE_ID="com.chriswa.aiusagetracker"
+BUNDLE_ID="com.chriswa.aispendtracker"
 # Release builds live under their own directory so a concurrent debug build
-# (make-app.sh, which owns build/AI Usage Tracker.app) can't clobber the bundle
+# (make-app.sh, which owns build/AI Spend Tracker.app) can't clobber the bundle
 # between signing and stapling — a mismatch there fails notarization stapling.
-APP="build/release/AI Usage Tracker.app"
-ZIP="build/AIUsageTracker.zip"
+APP="build/release/AI Spend Tracker.app"
+ZIP="build/AISpendTracker.zip"
 
 # --- Require a Developer ID Application identity (dev/ad-hoc certs won't pass
 #     notarization and won't launch on other people's Macs). ---
@@ -40,19 +40,19 @@ fi
 
 echo "building universal (release, arm64 + x86_64)…"
 swift build -c release --arch arm64 --arch x86_64
-BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/AIUsageTracker"
+BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/AISpendTracker"
 
 echo "assembling bundle…"
 rm -rf "$APP" "$ZIP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/AIUsageTracker"
+cp "$BIN" "$APP/Contents/MacOS/AISpendTracker"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 echo "signing as: $IDENTITY"
 # --timestamp (secure timestamp) and --options runtime (hardened runtime) are
 # both required for notarization.
 codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" \
-    --entitlements Resources/AIUsageTracker.entitlements \
+    --entitlements Resources/AISpendTracker.entitlements \
     --options runtime --timestamp "$APP"
 
 echo "verifying signature…"
@@ -102,4 +102,4 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 echo
 echo "built + notarized: $APP"
 echo "distributable:     $ZIP  (attach this to a GitHub Release)"
-echo "arch: $(lipo -archs "$APP/Contents/MacOS/AIUsageTracker")"
+echo "arch: $(lipo -archs "$APP/Contents/MacOS/AISpendTracker")"

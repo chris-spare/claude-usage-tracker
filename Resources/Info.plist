@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>AI Usage Tracker</string>
+    <string>AI Spend Tracker</string>
     <key>CFBundleDisplayName</key>
-    <string>AI Usage Tracker</string>
+    <string>AI Spend Tracker</string>
     <key>CFBundleIdentifier</key>
-    <string>com.chriswa.aiusagetracker</string>
+    <string>com.chriswa.aispendtracker</string>
     <key>CFBundleExecutable</key>
-    <string>AIUsageTracker</string>
+    <string>AISpendTracker</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

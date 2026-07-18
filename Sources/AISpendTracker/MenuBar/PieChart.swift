@@ -37,8 +37,16 @@ enum PieChart {
 
     // Untouched remainder — black.
     static let disc = NSColor.black
-    // Subtle hairline ring rather than a bold white edge.
+    // Subtle hairline ring rather than a bold white edge. The default suits a dark
+    // backdrop (the menu header, and the menu bar in dark mode); the tray passes a
+    // dark hairline in light mode via `outline(forDark:)`.
     static let outline = NSColor(white: 1, alpha: 0.5)
+
+    /// Hairline color for a given backdrop: white on dark, black on light — a faint
+    /// separator either way. The tray picks this from the menu bar's appearance.
+    static func outline(forDark isDark: Bool) -> NSColor {
+        NSColor(white: isDark ? 1 : 0, alpha: 0.5)
+    }
     /// Thickness of the solid black rim around each pie, as a fraction of the radius
     /// (with an absolute floor). The rim vanishes into a dark background but separates
     /// the pie from a pale menu in light mode. Used by the menu rings, not the tray.
@@ -149,12 +157,13 @@ enum PieChart {
         return out
     }
 
-    /// Compose the circles into one status-item image.
-    static func trayImage(from vm: TrayViewModel, now: Date = Date()) -> NSImage {
-        image(circles: circles(from: vm, now: now))
+    /// Compose the circles into one status-item image. `outline` is the hairline color
+    /// for the current menu-bar appearance (white on dark, black on light).
+    static func trayImage(from vm: TrayViewModel, now: Date = Date(), outline: NSColor = Self.outline) -> NSImage {
+        image(circles: circles(from: vm, now: now), outline: outline)
     }
 
-    static func image(circles: [Circle]) -> NSImage {
+    static func image(circles: [Circle], outline: NSColor = Self.outline) -> NSImage {
         // With nothing enabled/fetched, draw a single empty ring so the item stays visible.
         let drawn = circles.isEmpty
             ? [Circle(kind: .pie(time: 0, usage: 0), caption: "", usageColor: spendPalette.usage, timeColor: spendPalette.time)]
@@ -165,7 +174,7 @@ enum PieChart {
             for (i, c) in drawn.enumerated() {
                 let rect = NSRect(x: CGFloat(i) * (diameter + gap), y: y, width: diameter, height: diameter)
                 // The tray drops the black rim so the tiny pies keep their full size.
-                draw(c, in: rect, bordered: false)
+                draw(c, in: rect, bordered: false, outline: outline)
             }
             return true
         }
@@ -175,12 +184,12 @@ enum PieChart {
 
     /// Draw a single circle (pie or warning glyph). Used by both the tray image and
     /// the dropdown header, keeping them in lockstep. `bordered` draws the black rim
-    /// (menu only).
-    static func draw(_ circle: Circle, in rect: NSRect, bordered: Bool = true) {
+    /// (menu only); `outline` is the hairline color.
+    static func draw(_ circle: Circle, in rect: NSRect, bordered: Bool = true, outline: NSColor = Self.outline) {
         switch circle.kind {
         case .pie(let time, let usage):
             drawPie(time: time, usage: usage, in: rect, timeColor: circle.timeColor,
-                    usageColor: circle.usageColor, bordered: bordered)
+                    usageColor: circle.usageColor, bordered: bordered, outline: outline)
         case .error:
             drawErrorIcon(in: rect, color: circle.usageColor)
         }
@@ -209,7 +218,8 @@ enum PieChart {
     /// Draw one circle from already-computed fractions. Exposed for previews/tests.
     /// `bordered` leaves a black rim inside the disc (menu only).
     static func drawPie(time: Double, usage: Double, in rect: NSRect,
-                        timeColor: NSColor, usageColor: NSColor, bordered: Bool = true) {
+                        timeColor: NSColor, usageColor: NSColor, bordered: Bool = true,
+                        outline: NSColor = Self.outline) {
         let inset = outlineWidth / 2 + 0.25
         let rOuter = min(rect.width, rect.height) / 2 - inset
         let center = NSPoint(x: rect.midX, y: rect.midY)
@@ -224,14 +234,15 @@ enum PieChart {
 
         // Time: a solid wedge spanning the whole radius (both lanes).
         fillWedge(center: center, radius: r, from: 0, to: time, color: timeColor)
-        // Usage: a ring in the outer lane, over the time wedge.
+        // Usage: a ring in the outer lane, over the time wedge. Clamped to one full turn
+        // so an over-100% reading (shown in the text) never overfills the pie.
         fillRingWedge(center: center, innerRadius: r * ringInnerRatio, outerRadius: r,
-                      from: 0, to: usage, color: usageColor)
+                      from: 0, to: min(1, max(0, usage)), color: usageColor)
 
-        strokeOutline(center: center, radius: r)
+        strokeOutline(center: center, radius: r, color: outline)
 
-        // A full ring (window at 100%) gets a small white center dot as a subtle "maxed"
-        // flag. Clamped usage means this fires only at an actual ≥100%.
+        // At ≥100% the ring is full; add a small white center dot as a subtle "maxed"
+        // flag. Applies to every pie, spend included.
         if usage >= 1 {
             let dotR = r * fullDotRatio
             NSColor.white.setFill()
@@ -240,8 +251,8 @@ enum PieChart {
         }
     }
 
-    private static func strokeOutline(center: NSPoint, radius r: CGFloat) {
-        outline.setStroke()
+    private static func strokeOutline(center: NSPoint, radius r: CGFloat, color: NSColor = outline) {
+        color.setStroke()
         let ring = NSBezierPath(ovalIn: NSRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r))
         ring.lineWidth = outlineWidth
         ring.stroke()

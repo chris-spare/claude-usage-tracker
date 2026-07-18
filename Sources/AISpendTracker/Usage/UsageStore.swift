@@ -23,13 +23,9 @@ final class UsageStore {
         } else {
             self.fileURL = AppPaths.applicationSupport.appendingPathComponent("usage-cache.json")
         }
-        guard let raw = try? Data(contentsOf: self.fileURL) else { return }
-        if let decoded = try? JSONDecoder().decode(Cache.self, from: raw) {
-            cache = decoded
-        } else if let legacy = try? JSONDecoder().decode(LegacyCache.self, from: raw) {
-            cache = Self.migrate(legacy)   // pre-multi-provider Claude-only cache
-            save()
-        }
+        guard let raw = try? Data(contentsOf: self.fileURL),
+              let decoded = try? JSONDecoder().decode(Cache.self, from: raw) else { return }
+        cache = decoded
     }
 
     func lastFetchAt(_ id: ProviderID) -> Date? { cache.providers[id.rawValue]?.lastFetchAt }
@@ -52,38 +48,6 @@ final class UsageStore {
         guard let raw = try? JSONEncoder().encode(cache) else { return }
         try? raw.write(to: fileURL, options: .atomic)
     }
-
-    // MARK: - Legacy migration (old Claude-only cache shape)
-
-    private struct LegacyBucket: Codable { var utilization: Double; var resetsAt: Date? }
-    private struct LegacyExtra: Codable {
-        var isEnabled: Bool; var usedCents: Double; var monthlyLimitCents: Double?; var utilization: Double
-    }
-    private struct LegacyClaudeData: Codable {
-        var fiveHour: LegacyBucket?; var sevenDay: LegacyBucket?; var extraUsage: LegacyExtra?
-    }
-    private struct LegacyCache: Codable { var lastFetchAt: Date?; var data: LegacyClaudeData? }
-
-    private static func migrate(_ legacy: LegacyCache) -> Cache {
-        var snapshot: ProviderSnapshot?
-        if let d = legacy.data {
-            var windows: [UsageWindow] = []
-            if let b = d.fiveHour {
-                windows.append(UsageWindow(caption: "5-Hour", utilization: b.utilization, resetsAt: b.resetsAt,
-                                           timeBasis: .rollingWindow(length: WindowLength.fiveHour)))
-            }
-            if let b = d.sevenDay {
-                windows.append(UsageWindow(caption: "7-Day", utilization: b.utilization, resetsAt: b.resetsAt,
-                                           timeBasis: .rollingWindow(length: WindowLength.sevenDay)))
-            }
-            let spend = d.extraUsage.map {
-                SpendInfo(usedCents: $0.usedCents, apiLimitCents: $0.monthlyLimitCents, label: "Claude extra usage")
-            }
-            snapshot = ProviderSnapshot(windows: windows, spend: spend)
-        }
-        return Cache(providers: [ProviderID.claude.rawValue:
-            ProviderCache(lastFetchAt: legacy.lastFetchAt, snapshot: snapshot)])
-    }
 }
 
 /// App preferences backed by UserDefaults.
@@ -101,12 +65,14 @@ enum Settings {
         set { UserDefaults.standard.set(newValue, forKey: customLimitKey) }
     }
 
-    /// Which providers are shown. Defaults to Claude only (so upgrades from the
-    /// single-provider build don't regress); the user turns on Codex/Cursor.
+    /// Which providers are shown. On first run — nothing persisted yet — all
+    /// providers are enabled. After that the user's explicit choice is honored,
+    /// including turning them all off (which persists as an empty selection, kept
+    /// distinct from the never-set state by the key's absence).
     static var enabledProviders: Set<ProviderID> {
         get {
             guard let raw = UserDefaults.standard.array(forKey: enabledProvidersKey) as? [String] else {
-                return [.claude]
+                return Set(ProviderID.allCases)
             }
             return Set(raw.compactMap(ProviderID.init(rawValue:)))
         }

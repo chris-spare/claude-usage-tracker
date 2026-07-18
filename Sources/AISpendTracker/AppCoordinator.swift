@@ -25,7 +25,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private var runtimes: [ProviderID: Runtime] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Log.log("AI Usage launching (mock=\(Self.useMockData), enabled=\(Settings.enabledProviders.map(\.rawValue).sorted()))")
+        Log.log("AI Spend Tracker launching (mock=\(Self.useMockData), enabled=\(Settings.enabledProviders.map(\.rawValue).sorted()))")
         LaunchAtLogin.enableByDefaultOnce()
 
         menuBar.launchAtLoginState = { LaunchAtLogin.isEnabled }

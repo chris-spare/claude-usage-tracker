@@ -1,5 +1,5 @@
 import XCTest
-@testable import AIUsageTracker
+@testable import AISpendTracker
 
 final class ClaudeUsageFetcherTests: XCTestCase {
     private func window(_ snap: ProviderSnapshot, _ caption: String) -> UsageWindow? {

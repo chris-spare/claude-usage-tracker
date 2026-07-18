@@ -1,4 +1,4 @@
-# AI Usage Tracker
+# AI Spend Tracker
 
 A macOS menu-bar app that charts your AI coding-tool usage as donut circles — one
 per rate-limit window for each enabled provider (**Claude**, **Codex**, **Cursor**),
@@ -8,7 +8,7 @@ plus a combined **spend** circle for pay-as-you-go usage.
 > **Codex** and **Cursor** are implemented but still need further real-world
 > testing — please report anything that looks off.
 
-![AI Usage Tracker menu](docs/screenshot.png)
+![AI Spend Tracker menu](docs/screenshot.png)
 
 Each donut overlays two clockwise arcs from 12 o'clock: the elapsed **time** wedge
 (a darker shade, spanning the full radius) and the **usage** ring (the brighter
@@ -31,25 +31,26 @@ shows the error with a **Copy Error** action, without affecting the other provid
 
 ### Providers
 
-Enable or disable each provider from the menu → **Providers**. Claude is on by
-default; turn on Codex and Cursor as you use them. Each reads its own local
+Enable or disable each provider from the menu → **Providers**. All three are on by
+default; disable any you don't use and your choice sticks. Each reads its own local
 credentials:
 
 - **Claude** — the `Claude Code-credentials` Keychain item (Claude.ai subscription).
 - **Codex** — `~/.codex/auth.json` (ChatGPT login).
 - **Cursor** — the `cursor-access-token` Keychain item.
 
-### Spend total
+### Spend budget
 
-The spend circle fills against a spend total that defaults to **$2500**. Change it
-from the menu → **Set Custom Spend Total…**.
+The spend circle fills toward a spend budget that defaults to **$2500**. Change it
+from the menu → **Set Spend Budget…**. Going over is fine — the pie caps at a full
+ring (with a white "maxed" dot) while the percentage keeps counting up (e.g. 123%).
 
 ## Install
 
 Runs on **macOS 13 (Ventura) or later**, on both Apple Silicon and Intel Macs.
 
-1. Download `AIUsageTracker.zip` from the [latest release](../../releases/latest).
-2. Unzip it and drag **AI Usage Tracker.app** into `/Applications`.
+1. Download `AISpendTracker.zip` from the [latest release](../../releases/latest).
+2. Unzip it and drag **AI Spend Tracker.app** into `/Applications`.
 3. Open it. It's signed and notarized by Apple, so it launches without warnings
    (on first open macOS confirms it was downloaded from the internet — click
    **Open**).
@@ -64,7 +65,7 @@ Tools: `xcode-select --install`).
 ./scripts/make-app.sh
 
 # 2. Launch it.
-open "build/AI Usage Tracker.app"
+open "build/AI Spend Tracker.app"
 ```
 
 The donuts appear in your menu bar. The first time a provider fetches, macOS may ask
@@ -81,7 +82,7 @@ Login**); your choice sticks.
 
 `./scripts/make-release.sh` produces the distributable artifact: a universal
 (arm64 + x86_64) build, signed with a Developer ID Application certificate under a
-hardened runtime, notarized by Apple, and stapled. Output is `build/AIUsageTracker.zip`
+hardened runtime, notarized by Apple, and stapled. Output is `build/AISpendTracker.zip`
 — attach it to a GitHub Release.
 
 One-time setup:
@@ -109,5 +110,5 @@ One-time setup:
   with the clock, refreshed each time you open the menu.
 - A provider whose credentials are missing (e.g. an API-key-only Claude account) is
   noted in its section and stops polling; the others keep working.
-- Runtime log: `~/Library/Logs/AIUsageTracker.log`.
-- Tests: `swift test`. Preview render: `swift run AIUsageTracker --render /tmp/preview.png`.
+- Runtime log: `~/Library/Logs/AISpendTracker.log`.
+- Tests: `swift test`. Preview render: `swift run AISpendTracker --render /tmp/preview.png`.

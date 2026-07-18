@@ -14,6 +14,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let ringsHeader = RingsHeaderView(frame: NSRect(x: 0, y: 0, width: 220, height: 82))
+    /// Repaints the tray when the menu bar flips between light and dark (see `redraw`).
+    private var appearanceObserver: NSKeyValueObservation?
 
     /// Latest state to render. Replaced wholesale by `apply(_:)`.
     private var vm = TrayViewModel(providers: [], customLimitCents: Settings.defaultCustomLimitCents)
@@ -35,6 +37,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         super.init()
         menu.delegate = self
         statusItem.menu = menu
+        // Repaint the tray when the menu bar flips light/dark so the pie hairline stays
+        // legible against the bar. effectiveAppearance changes fire on the main thread.
+        appearanceObserver = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.redraw(now: Date()) }
+        }
         rebuildMenu(now: Date())
         redraw(now: Date())
     }
@@ -51,7 +58,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Repaint the tray icon from the current view model.
     private func redraw(now: Date) {
         guard let button = statusItem.button else { return }
-        button.image = PieChart.trayImage(from: vm, now: now)
+        let isDark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        button.image = PieChart.trayImage(from: vm, now: now, outline: PieChart.outline(forDark: isDark))
         let errored = vm.providers.filter { $0.error != nil }.map(\.displayName)
         button.image?.accessibilityDescription = errored.isEmpty
             ? "AI usage across \(vm.providers.count) provider(s)"
@@ -68,8 +76,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func rebuildMenu(now: Date) {
         menu.removeAllItems()
 
-        let title = Self.disabledItem("AI Usage Tracker")
-        title.attributedTitle = NSAttributedString(string: "AI Usage Tracker", attributes: [
+        let title = Self.disabledItem("AI Spend Tracker")
+        title.attributedTitle = NSAttributedString(string: "AI Spend Tracker", attributes: [
             .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .bold)])
         menu.addItem(title)
         menu.addItem(.separator())
@@ -139,7 +147,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     /// The combined spend section: total spend, per-provider breakdown, the spend
-    /// total, and "Set Custom Spend Total…".
+    /// budget, and "Set Spend Budget…".
     private func addSpendSection() {
         let title = Self.disabledItem("Spend (Month-to-Date)")
         title.attributedTitle = NSAttributedString(string: "Spend (Month-to-Date)", attributes: [
@@ -157,7 +165,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             }
         }
 
-        let setLimit = NSMenuItem(title: "Set Custom Spend Total…", action: #selector(setCustomLimit), keyEquivalent: "")
+        let setLimit = NSMenuItem(title: "Set Spend Budget…", action: #selector(setCustomLimit), keyEquivalent: "")
         setLimit.target = self
         menu.addItem(setLimit)
     }
@@ -220,8 +228,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Prompt for the combined spend total (a dollar amount), persist it, and repaint.
     @objc private func setCustomLimit() {
         let alert = NSAlert()
-        alert.messageText = "Set Custom Spend Total"
-        alert.informativeText = "Enter the dollar amount the combined spend pie fills against."
+        alert.messageText = "Set Spend Budget"
+        alert.informativeText = "Enter the dollar amount the combined spend pie fills toward."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         field.stringValue = String(format: "%.2f", vm.customLimitCents / 100)
         field.placeholderString = "e.g. 2500.00"
@@ -246,7 +254,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         Settings.customLimitCents = (dollars * 100).rounded()
         vm.customLimitCents = Settings.customLimitCents
-        Log.log("spend: custom total set to \(UsageMath.formatDollars(Settings.customLimitCents))")
+        Log.log("spend: budget set to \(UsageMath.formatDollars(Settings.customLimitCents))")
         rebuildMenu(now: Date())
         redraw(now: Date())
     }

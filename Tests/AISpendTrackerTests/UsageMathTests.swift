@@ -1,5 +1,5 @@
 import XCTest
-@testable import AIUsageTracker
+@testable import AISpendTracker
 
 final class UsageMathTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -36,10 +36,10 @@ final class UsageMathTests: XCTestCase {
         XCTAssertEqual(UsageMath.timeFraction(.none, resetsAt: nil, now: now), 0)
     }
 
-    func testUsageFractionClamps() {
+    func testUsageFraction() {
         XCTAssertEqual(UsageMath.usageFraction(utilization: 45), 0.45, accuracy: 1e-9)
-        XCTAssertEqual(UsageMath.usageFraction(utilization: 130), 1)
-        XCTAssertEqual(UsageMath.usageFraction(utilization: -5), 0)
+        XCTAssertEqual(UsageMath.usageFraction(utilization: 130), 1.3, accuracy: 1e-9)   // not clamped above 1
+        XCTAssertEqual(UsageMath.usageFraction(utilization: -5), 0)                      // floored at 0
     }
 
     func testProjectionExtrapolatesLinearly() {
@@ -86,7 +86,7 @@ final class UsageMathTests: XCTestCase {
 
     func testSpendFraction() {
         XCTAssertEqual(UsageMath.spendFraction(usedCents: 24955, limitCents: 50000), 0.4991, accuracy: 1e-9)
-        XCTAssertEqual(UsageMath.spendFraction(usedCents: 60000, limitCents: 50000), 1)   // clamps
+        XCTAssertEqual(UsageMath.spendFraction(usedCents: 60000, limitCents: 50000), 1.2, accuracy: 1e-9)   // not clamped above 1
         XCTAssertEqual(UsageMath.spendFraction(usedCents: 100, limitCents: 0), 0)         // no limit → 0
     }
 

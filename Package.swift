@@ -1,20 +1,20 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// AI Usage Tracker — a macOS menu-bar app showing per-provider usage pie charts
+// AI Spend Tracker — a macOS menu-bar app showing per-provider usage pie charts
 // (Claude, Codex, Cursor) and a details menu. Pure AppKit, no external deps.
 let package = Package(
-    name: "AIUsageTracker",
+    name: "AISpendTracker",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "AIUsageTracker",
-            path: "Sources/AIUsageTracker"
+            name: "AISpendTracker",
+            path: "Sources/AISpendTracker"
         ),
         .testTarget(
-            name: "AIUsageTrackerTests",
-            dependencies: ["AIUsageTracker"],
-            path: "Tests/AIUsageTrackerTests"
+            name: "AISpendTrackerTests",
+            dependencies: ["AISpendTracker"],
+            path: "Tests/AISpendTrackerTests"
         ),
     ]
 )

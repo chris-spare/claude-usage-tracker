@@ -37,6 +37,12 @@ enum PieChart {
     static let disc = NSColor.black
     // Subtle hairline ring rather than a bold white edge.
     static let outline = NSColor(white: 1, alpha: 0.5)
+    /// Thickness of the solid black rim around each pie, as a fraction of the radius
+    /// (with an absolute floor so it still reads on the tiny tray circles). The rim
+    /// vanishes into a dark background but separates the pie — and light rings like the
+    /// white spend ring — from a pale menu bar / menu in light mode.
+    static let borderRatio: CGFloat = 0.12
+    static let borderMinWidth: CGFloat = 1
 
     // Geometry (points), sized to fill the menu-bar height.
     static let diameter: CGFloat = 15
@@ -67,6 +73,10 @@ enum PieChart {
         var caption: String
         var usageColor: NSColor
         var timeColor: NSColor
+        /// Color for the heading text in the dropdown header. Defaults to `usageColor`
+        /// (the brand color) when nil; the spend pie overrides it with an adaptive
+        /// label color, since its white ring color is invisible on a light menu.
+        var headingColor: NSColor?
         /// Cumulative series (utilization % or spend cents, oldest first) feeding the
         /// per-column sparkline in the dropdown header. Unused by the tray image.
         var spark: [(Date, Double)]
@@ -79,13 +89,15 @@ enum PieChart {
         var sparkTooltip: String?
 
         init(kind: Kind, heading: String? = nil, caption: String,
-             usageColor: NSColor, timeColor: NSColor, spark: [(Date, Double)] = [],
+             usageColor: NSColor, timeColor: NSColor, headingColor: NSColor? = nil,
+             spark: [(Date, Double)] = [],
              resetsAt: Date? = nil, pieTooltip: String? = nil, sparkTooltip: String? = nil) {
             self.kind = kind
             self.heading = heading
             self.caption = caption
             self.usageColor = usageColor
             self.timeColor = timeColor
+            self.headingColor = headingColor
             self.spark = spark
             self.resetsAt = resetsAt
             self.pieTooltip = pieTooltip
@@ -130,6 +142,7 @@ enum PieChart {
                                                           limitCents: vm.customLimitCents)),
                 heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Spend",
                 usageColor: spendPalette.usage, timeColor: spendPalette.time,
+                headingColor: .labelColor,
                 spark: vm.spendSeries,
                 resetsAt: UsageMath.monthResetDate(now: now),
                 sparkTooltip: UsageMath.recentPeakText(vm.spendSeries, unit: .dollars)))
@@ -195,11 +208,15 @@ enum PieChart {
     static func drawPie(time: Double, usage: Double, in rect: NSRect,
                         timeColor: NSColor, usageColor: NSColor) {
         let inset = outlineWidth / 2 + 0.25
-        let r = min(rect.width, rect.height) / 2 - inset
+        let rOuter = min(rect.width, rect.height) / 2 - inset
         let center = NSPoint(x: rect.midX, y: rect.midY)
 
+        // Black backing disc at the full radius. The colored content is drawn inside a
+        // thinner radius, so the annulus between them stays black — the pie's rim.
         disc.setFill()
-        NSBezierPath(ovalIn: NSRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r)).fill()
+        NSBezierPath(ovalIn: NSRect(x: center.x - rOuter, y: center.y - rOuter,
+                                    width: 2 * rOuter, height: 2 * rOuter)).fill()
+        let r = rOuter - max(borderMinWidth, rOuter * borderRatio)
 
         // Time: a solid wedge spanning the whole radius (both lanes).
         fillWedge(center: center, radius: r, from: 0, to: time, color: timeColor)

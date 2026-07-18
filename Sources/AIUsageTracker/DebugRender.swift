@@ -104,13 +104,13 @@ enum DebugRender {
         try? png.write(to: URL(fileURLWithPath: outPath))
         FileHandle.standardError.write(Data("render: wrote \(outPath)\n".utf8))
 
-        renderHeader(outPath: (outPath as NSString).deletingPathExtension + "-header.png")
+        renderHeader(baseOutPath: outPath)
     }
 
     /// Render the dropdown rings header (columns + reset lines + sparklines) to its
     /// own PNG, so the menu-open layout is eyeball-verifiable without launching.
     @MainActor
-    private static func renderHeader(outPath: String) {
+    private static func renderHeader(baseOutPath: String) {
         let now = Date()
         func t(_ minAgo: Double) -> Date { now.addingTimeInterval(-minAgo * 60) }
         // A rising utilization history so each window's sparkline has real data.
@@ -136,25 +136,33 @@ enum DebugRender {
             lastUpdated: now, history: history("Weekly", 12))
 
         let vm = TrayViewModel(providers: [claude, cursor], customLimitCents: 250000)
-        let header = RingsHeaderView(frame: .zero)
-        header.appearance = NSAppearance(named: .darkAqua)
-        header.circles = PieChart.circles(from: vm, now: now)
-        header.setFrameSize(NSSize(width: header.preferredWidth, height: header.preferredHeight))
 
-        guard let rep = header.bitmapImageRepForCachingDisplay(in: header.bounds) else { return }
-        header.cacheDisplay(in: header.bounds, to: rep)
-
-        // Composite over a menu-like dark background so the adaptive text is visible.
-        let out = NSImage(size: header.bounds.size, flipped: false) { rect in
-            NSColor(white: 0.18, alpha: 1).setFill()
-            rect.fill()
-            NSImage(cgImage: rep.cgImage!, size: rect.size).draw(in: rect)
-            return true
+        // Render both themes over a menu-like background, so light mode (adaptive text,
+        // black pie rims) is verifiable alongside dark.
+        let themes: [(NSAppearance.Name, CGFloat, String)] = [
+            (.darkAqua, 0.18, "-header.png"),
+            (.aqua, 0.96, "-header-light.png"),
+        ]
+        let base = (baseOutPath as NSString).deletingPathExtension
+        for (name, bg, suffix) in themes {
+            let header = RingsHeaderView(frame: .zero)
+            header.appearance = NSAppearance(named: name)
+            header.circles = PieChart.circles(from: vm, now: now)
+            header.setFrameSize(NSSize(width: header.preferredWidth, height: header.preferredHeight))
+            guard let rep = header.bitmapImageRepForCachingDisplay(in: header.bounds) else { continue }
+            header.cacheDisplay(in: header.bounds, to: rep)
+            let out = NSImage(size: header.bounds.size, flipped: false) { rect in
+                NSColor(white: bg, alpha: 1).setFill()
+                rect.fill()
+                if let cg = rep.cgImage { NSImage(cgImage: cg, size: rect.size).draw(in: rect) }
+                return true
+            }
+            guard let tiff = out.tiffRepresentation, let bmp = NSBitmapImageRep(data: tiff),
+                  let png = bmp.representation(using: .png, properties: [:]) else { continue }
+            let path = base + suffix
+            try? png.write(to: URL(fileURLWithPath: path))
+            FileHandle.standardError.write(Data("render: wrote \(path)\n".utf8))
         }
-        guard let tiff = out.tiffRepresentation, let bmp = NSBitmapImageRep(data: tiff),
-              let png = bmp.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: URL(fileURLWithPath: outPath))
-        FileHandle.standardError.write(Data("render: wrote \(outPath)\n".utf8))
     }
 
     private static func drawLabel(_ text: String, centeredIn rect: NSRect) {

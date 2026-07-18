@@ -82,10 +82,12 @@ final class RingsHeaderView: NSView {
             // Text lines, top-down, each centered in the column.
             var y = rects.ring.minY - captionGap - headingHeight
             if let heading = circle.heading {
-                // Bold, in the pie's highlight color, to tie the column to its ring.
+                // Bold, in the pie's highlight color, to tie the column to its ring —
+                // but the spend pie's white ring color would vanish on a light menu, so
+                // it supplies an adaptive `headingColor` instead.
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
-                    .foregroundColor: circle.usageColor,
+                    .foregroundColor: circle.headingColor ?? circle.usageColor,
                 ]
                 drawLine(heading, attrs: attrs, columnX: colX, bottomY: y, height: headingHeight)
             }

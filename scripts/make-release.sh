@@ -31,7 +31,7 @@ ZIP="build/AIUsageTracker.zip"
 # --- Require a Developer ID Application identity (dev/ad-hoc certs won't pass
 #     notarization and won't launch on other people's Macs). ---
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+    | awk -F'"' '/Developer ID Application/ && !f {print $2; f=1}')"
 if [ -z "$IDENTITY" ]; then
     echo "error: no 'Developer ID Application' certificate found in the Keychain." >&2
     echo "       Create one in Xcode → Settings → Accounts → Manage Certificates → +." >&2
@@ -59,7 +59,7 @@ echo "verifying signature…"
 codesign --verify --strict --verbose=2 "$APP"
 # Record the signed code hash so we can detect the bundle drifting out from
 # under us before we staple (see the check after notarization).
-SIGNED_CDHASH="$(codesign -dvvv "$APP" 2>&1 | awk -F= '/^CDHash=/{print $2; exit}')"
+SIGNED_CDHASH="$(codesign -dvvv "$APP" 2>&1 | awk -F= '/^CDHash=/ && !f {print $2; f=1}')"
 
 echo "zipping for notarization…"
 # ditto preserves the bundle structure and extended attributes notarytool needs.
@@ -68,7 +68,7 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 echo "submitting to Apple for notarization (this can take a few minutes)…"
 xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
 
-NOW_CDHASH="$(codesign -dvvv "$APP" 2>&1 | awk -F= '/^CDHash=/{print $2; exit}')"
+NOW_CDHASH="$(codesign -dvvv "$APP" 2>&1 | awk -F= '/^CDHash=/ && !f {print $2; f=1}')"
 if [ "$NOW_CDHASH" != "$SIGNED_CDHASH" ]; then
     echo "error: the bundle changed after it was submitted (cdhash $SIGNED_CDHASH" >&2
     echo "       → $NOW_CDHASH). Something rebuilt '$APP' during notarization, so" >&2

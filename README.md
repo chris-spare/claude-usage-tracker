@@ -2,7 +2,11 @@
 
 A macOS menu-bar app that charts your AI coding-tool usage as donut circles — one
 per rate-limit window for each enabled provider (**Claude**, **Codex**, **Cursor**),
-plus a combined **cost** circle for pay-as-you-go spend.
+plus a combined **spend** circle for pay-as-you-go usage.
+
+> **Provider support:** **Claude** is well-supported and the primary target.
+> **Codex** and **Cursor** are implemented but still need further real-world
+> testing — please report anything that looks off.
 
 ![AI Usage Tracker menu](docs/screenshot.png)
 
@@ -10,19 +14,20 @@ Each donut overlays two clockwise arcs from 12 o'clock: the elapsed **time** wed
 (a darker shade, spanning the full radius) and the **usage** ring (the brighter
 brand color, in the outer lane) — so at a glance you see usage against how far into
 the window you are. Providers are color-coded: Claude orange, Codex blue, Cursor
-violet; the cost circle is white over gray.
+violet; the spend circle is white over gray.
 
 Windows differ by provider: Claude has a 5-hour and a 7-day window; Codex a 5-hour
 plus weekly window (or a single window on the free plan); Cursor a monthly billing
-cycle. The cost circle sums every provider's month-to-date overage against a single
-cost total.
+cycle. The spend circle sums every provider's month-to-date overage against a single
+spend total.
 
-Click the icon for details per provider — current % + projected end-of-window % +
-reset time for each window, a per-column usage-rate sparkline, and a recent-peak
-readout — plus the combined spend with a per-provider breakdown, and when each last
-refreshed. If a provider's last fetch failed, its circle is replaced by a
-color-tinted ⚠︎ glyph and its section shows the error with a **Copy Error** action,
-without affecting the other providers.
+Click the icon for a details panel — one column per circle showing current usage %,
+elapsed %, and a live reset countdown, over a usage-rate sparkline. Hover a column
+for more: projected end-of-window usage on the pie, the absolute reset time on the
+countdown, and the recent-peak rate on the sparkline. Below sits the combined spend
+with a per-provider breakdown, and when each provider last refreshed. If a provider's
+last fetch failed, its circle is replaced by a color-tinted ⚠︎ glyph and the menu
+shows the error with a **Copy Error** action, without affecting the other providers.
 
 ### Providers
 
@@ -34,10 +39,10 @@ credentials:
 - **Codex** — `~/.codex/auth.json` (ChatGPT login).
 - **Cursor** — the `cursor-access-token` Keychain item.
 
-### Cost total
+### Spend total
 
-The cost circle fills against a cost total that defaults to **$2500**. Change it from
-the menu → **Set Custom Cost Total…**.
+The spend circle fills against a spend total that defaults to **$2500**. Change it
+from the menu → **Set Custom Spend Total…**.
 
 ## Install
 

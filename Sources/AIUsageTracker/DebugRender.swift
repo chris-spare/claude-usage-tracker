@@ -123,7 +123,7 @@ enum DebugRender {
 
         let claude = ProviderView(id: .claude, displayName: "Claude",
             snapshot: ProviderSnapshot(windows: [
-                UsageWindow(caption: "5-Hour", utilization: 72, resetsAt: now.addingTimeInterval(2 * 3600),
+                UsageWindow(caption: "5-Hour", utilization: 100, resetsAt: now.addingTimeInterval(2 * 3600),
                             timeBasis: .rollingWindow(length: WindowLength.fiveHour)),
             ], spend: SpendInfo(usedCents: 12345, apiLimitCents: 50000, label: "Claude extra usage")),
             lastUpdated: now, history: history("5-Hour", 30, spend: 900))

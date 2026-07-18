@@ -69,6 +69,12 @@ final class RingsHeaderView: NSView {
         .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
         .foregroundColor: NSColor.secondaryLabelColor,
     ]
+    /// The "Usage" line when the window is maxed (100%) — bright and bold, like the
+    /// caption, so a capped window stands out from the grayed-out stat lines.
+    private static let statAttrsFull: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold),
+        .foregroundColor: NSColor.labelColor,
+    ]
 
     override func draw(_ dirtyRect: NSRect) {
         guard !circles.isEmpty else { return }
@@ -82,12 +88,10 @@ final class RingsHeaderView: NSView {
             // Text lines, top-down, each centered in the column.
             var y = rects.ring.minY - captionGap - headingHeight
             if let heading = circle.heading {
-                // Bold, in the pie's highlight color, to tie the column to its ring —
-                // but the spend pie's white ring color would vanish on a light menu, so
-                // it supplies an adaptive `headingColor` instead.
+                // Bold, in the pie's highlight color, to tie the column to its ring.
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
-                    .foregroundColor: circle.headingColor ?? circle.usageColor,
+                    .foregroundColor: circle.usageColor,
                 ]
                 drawLine(heading, attrs: attrs, columnX: colX, bottomY: y, height: headingHeight)
             }
@@ -96,7 +100,9 @@ final class RingsHeaderView: NSView {
 
             guard case .pie(let time, let usage) = circle.kind else { continue }
             y -= lineGap + statHeight
-            drawLine("Usage: \(pct(usage))%", attrs: Self.statAttrs, columnX: colX, bottomY: y, height: statHeight)
+            // A maxed window (100%) shows its Usage line bright/bold instead of grayed.
+            let usageAttrs = usage >= 1 ? Self.statAttrsFull : Self.statAttrs
+            drawLine("Usage: \(pct(usage))%", attrs: usageAttrs, columnX: colX, bottomY: y, height: statHeight)
             y -= lineGap + statHeight
             drawLine("Elapsed: \(pct(time))%", attrs: Self.statAttrs, columnX: colX, bottomY: y, height: statHeight)
             y -= lineGap + statHeight

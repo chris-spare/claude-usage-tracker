@@ -11,7 +11,7 @@ import AppKit
 ///   3. the "usage" layer as a ring [0 … usage] in the outer lane, over the wedge,
 ///   4. a thin hairline outline.
 /// Colors come from the per-provider palette (usage ring + darkened time wedge);
-/// the spend pie keeps a white ring over a gray wedge.
+/// the spend pie uses a red ring over a dimmed-red wedge.
 enum PieChart {
     /// A provider's (or the spend pie's) two colors.
     struct Palette { let usage: NSColor; let time: NSColor }
@@ -25,8 +25,10 @@ enum PieChart {
         case .cursor: return make(172, 124, 224)
         }
     }
-    /// Combined spend pie: white usage ring over a gray time wedge.
-    static let spendPalette = Palette(usage: .white, time: NSColor(white: 0.6, alpha: 1))
+    /// Combined spend pie: a red usage ring (#F04C4C, near the brand colors' perceived
+    /// lightness) over a neutral gray time wedge.
+    static let spendPalette = Palette(usage: NSColor(srgbRed: 240 / 255, green: 76 / 255, blue: 76 / 255, alpha: 1),
+                                      time: NSColor(white: 0.5, alpha: 1))
 
     private static func make(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> Palette {
         Palette(usage: NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1),
@@ -38,19 +40,23 @@ enum PieChart {
     // Subtle hairline ring rather than a bold white edge.
     static let outline = NSColor(white: 1, alpha: 0.5)
     /// Thickness of the solid black rim around each pie, as a fraction of the radius
-    /// (with an absolute floor so it still reads on the tiny tray circles). The rim
-    /// vanishes into a dark background but separates the pie — and light rings like the
-    /// white spend ring — from a pale menu bar / menu in light mode.
+    /// (with an absolute floor). The rim vanishes into a dark background but separates
+    /// the pie from a pale menu in light mode. Used by the menu rings, not the tray.
     static let borderRatio: CGFloat = 0.12
     static let borderMinWidth: CGFloat = 1
 
-    // Geometry (points), sized to fill the menu-bar height.
-    static let diameter: CGFloat = 15
+    // Geometry (points). The circle diameter tracks the live menu-bar height so the
+    // tray icon fills it like other status items, rather than sitting small in the bar.
+    // A ~4pt margin keeps the outline off the bar edges; the floor guards odd values.
+    static var diameter: CGFloat { max(15, NSStatusBar.system.thickness - 4) }
     static let gap: CGFloat = 5
     static let outlineWidth: CGFloat = 0.5
     /// Inner edge of the usage ring, as a fraction of the pie radius (so the ring band
     /// is the outer 1/5 of the radius).
     static let ringInnerRatio: CGFloat = 0.8
+    /// Radius of the white "maxed out" center dot (drawn at 100%), as a fraction of the
+    /// pie radius.
+    static let fullDotRatio: CGFloat = 0.13
 
     static func size(circles: Int) -> NSSize {
         let n = max(1, circles)   // always at least one slot so the tray item is clickable
@@ -73,10 +79,6 @@ enum PieChart {
         var caption: String
         var usageColor: NSColor
         var timeColor: NSColor
-        /// Color for the heading text in the dropdown header. Defaults to `usageColor`
-        /// (the brand color) when nil; the spend pie overrides it with an adaptive
-        /// label color, since its white ring color is invisible on a light menu.
-        var headingColor: NSColor?
         /// Cumulative series (utilization % or spend cents, oldest first) feeding the
         /// per-column sparkline in the dropdown header. Unused by the tray image.
         var spark: [(Date, Double)]
@@ -89,15 +91,13 @@ enum PieChart {
         var sparkTooltip: String?
 
         init(kind: Kind, heading: String? = nil, caption: String,
-             usageColor: NSColor, timeColor: NSColor, headingColor: NSColor? = nil,
-             spark: [(Date, Double)] = [],
+             usageColor: NSColor, timeColor: NSColor, spark: [(Date, Double)] = [],
              resetsAt: Date? = nil, pieTooltip: String? = nil, sparkTooltip: String? = nil) {
             self.kind = kind
             self.heading = heading
             self.caption = caption
             self.usageColor = usageColor
             self.timeColor = timeColor
-            self.headingColor = headingColor
             self.spark = spark
             self.resetsAt = resetsAt
             self.pieTooltip = pieTooltip
@@ -142,7 +142,6 @@ enum PieChart {
                                                           limitCents: vm.customLimitCents)),
                 heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Spend",
                 usageColor: spendPalette.usage, timeColor: spendPalette.time,
-                headingColor: .labelColor,
                 spark: vm.spendSeries,
                 resetsAt: UsageMath.monthResetDate(now: now),
                 sparkTooltip: UsageMath.recentPeakText(vm.spendSeries, unit: .dollars)))
@@ -165,7 +164,8 @@ enum PieChart {
             let y = (size.height - diameter) / 2
             for (i, c) in drawn.enumerated() {
                 let rect = NSRect(x: CGFloat(i) * (diameter + gap), y: y, width: diameter, height: diameter)
-                draw(c, in: rect)
+                // The tray drops the black rim so the tiny pies keep their full size.
+                draw(c, in: rect, bordered: false)
             }
             return true
         }
@@ -174,11 +174,13 @@ enum PieChart {
     }
 
     /// Draw a single circle (pie or warning glyph). Used by both the tray image and
-    /// the dropdown header, keeping them in lockstep.
-    static func draw(_ circle: Circle, in rect: NSRect) {
+    /// the dropdown header, keeping them in lockstep. `bordered` draws the black rim
+    /// (menu only).
+    static func draw(_ circle: Circle, in rect: NSRect, bordered: Bool = true) {
         switch circle.kind {
         case .pie(let time, let usage):
-            drawPie(time: time, usage: usage, in: rect, timeColor: circle.timeColor, usageColor: circle.usageColor)
+            drawPie(time: time, usage: usage, in: rect, timeColor: circle.timeColor,
+                    usageColor: circle.usageColor, bordered: bordered)
         case .error:
             drawErrorIcon(in: rect, color: circle.usageColor)
         }
@@ -205,18 +207,20 @@ enum PieChart {
     }
 
     /// Draw one circle from already-computed fractions. Exposed for previews/tests.
+    /// `bordered` leaves a black rim inside the disc (menu only).
     static func drawPie(time: Double, usage: Double, in rect: NSRect,
-                        timeColor: NSColor, usageColor: NSColor) {
+                        timeColor: NSColor, usageColor: NSColor, bordered: Bool = true) {
         let inset = outlineWidth / 2 + 0.25
         let rOuter = min(rect.width, rect.height) / 2 - inset
         let center = NSPoint(x: rect.midX, y: rect.midY)
 
-        // Black backing disc at the full radius. The colored content is drawn inside a
-        // thinner radius, so the annulus between them stays black — the pie's rim.
+        // Black backing disc at the full radius. When bordered, the colored content is
+        // drawn inside a thinner radius so the annulus stays black — the pie's rim,
+        // which separates it from a pale background in the menu.
         disc.setFill()
         NSBezierPath(ovalIn: NSRect(x: center.x - rOuter, y: center.y - rOuter,
                                     width: 2 * rOuter, height: 2 * rOuter)).fill()
-        let r = rOuter - max(borderMinWidth, rOuter * borderRatio)
+        let r = bordered ? rOuter - max(borderMinWidth, rOuter * borderRatio) : rOuter
 
         // Time: a solid wedge spanning the whole radius (both lanes).
         fillWedge(center: center, radius: r, from: 0, to: time, color: timeColor)
@@ -225,6 +229,15 @@ enum PieChart {
                       from: 0, to: usage, color: usageColor)
 
         strokeOutline(center: center, radius: r)
+
+        // A full ring (window at 100%) gets a small white center dot as a subtle "maxed"
+        // flag. Clamped usage means this fires only at an actual ≥100%.
+        if usage >= 1 {
+            let dotR = r * fullDotRatio
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: NSRect(x: center.x - dotR, y: center.y - dotR,
+                                        width: 2 * dotR, height: 2 * dotR)).fill()
+        }
     }
 
     private static func strokeOutline(center: NSPoint, radius r: CGFloat) {

@@ -14,7 +14,7 @@ Each donut overlays two clockwise arcs from 12 o'clock: the elapsed **time** wed
 (a darker shade, spanning the full radius) and the **usage** ring (the brighter
 brand color, in the outer lane) — so at a glance you see usage against how far into
 the window you are. Providers are color-coded: Claude orange, Codex blue, Cursor
-violet; the spend circle is white over gray.
+violet; the spend circle is red.
 
 Windows differ by provider: Claude has a 5-hour and a 7-day window; Codex a 5-hour
 plus weekly window (or a single window on the free plan); Cursor a monthly billing

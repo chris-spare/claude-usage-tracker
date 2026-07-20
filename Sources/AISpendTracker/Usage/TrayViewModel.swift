@@ -12,15 +12,20 @@ struct ProviderView {
     var lastUpdated: Date?
     var error: String?
     var history: [UsageHistory.Sample]
+    /// The provider's most recent raw response body, for the "copy last response"
+    /// affordance. Nil until we've recorded one.
+    var lastRawResponse: String?
 
     init(id: ProviderID, displayName: String, snapshot: ProviderSnapshot? = nil,
-         lastUpdated: Date? = nil, error: String? = nil, history: [UsageHistory.Sample] = []) {
+         lastUpdated: Date? = nil, error: String? = nil, history: [UsageHistory.Sample] = [],
+         lastRawResponse: String? = nil) {
         self.id = id
         self.displayName = displayName
         self.snapshot = snapshot
         self.lastUpdated = lastUpdated
         self.error = error
         self.history = history
+        self.lastRawResponse = lastRawResponse
     }
 }
 
@@ -30,6 +35,8 @@ struct ProviderView {
 struct TrayViewModel {
     var providers: [ProviderView]
     var customLimitCents: Double
+    /// How the combined spend renders in the tray (the dropdown always keeps the ring).
+    var spendDisplayMode: SpendDisplayMode = .circle
 
     /// Sum of every enabled provider's month-to-date spend (cents).
     var combinedSpendCents: Double {

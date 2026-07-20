@@ -11,6 +11,12 @@ swift build && swift test          # build + run tests
 open "build/AI Spend Tracker.app"  # run it
 ```
 
+**Always rebuild and restart the locally-running app after making changes** so the
+user is exercising the current code, not a stale bundle: repackage with
+`./scripts/make-app.sh`, quit the running instance
+(`osascript -e 'quit app "AI Spend Tracker"'`), then relaunch with
+`open "build/AI Spend Tracker.app"`.
+
 ## Releasing
 
 To cut and publish a new version — a universal, Developer ID–signed, Apple-notarized

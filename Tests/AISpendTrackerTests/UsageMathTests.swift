@@ -10,6 +10,22 @@ final class UsageMathTests: XCTestCase {
                     timeBasis: .rollingWindow(length: length), supportsProjection: projects)
     }
 
+    func testFormatAgoShort() {
+        func ago(_ seconds: TimeInterval) -> String {
+            UsageMath.formatAgoShort(since: now.addingTimeInterval(-seconds), now: now)
+        }
+        XCTAssertEqual(ago(0), "0s")
+        XCTAssertEqual(ago(47), "47s")
+        XCTAssertEqual(ago(59), "59s")
+        XCTAssertEqual(ago(60), "1m")
+        XCTAssertEqual(ago(3 * 60 + 30), "3m")      // truncates to whole minutes
+        XCTAssertEqual(ago(59 * 60), "59m")
+        XCTAssertEqual(ago(2 * 3600 + 5 * 60), "2h")
+        XCTAssertEqual(ago(25 * 3600), "1d")
+        // A clock that briefly reads behind the fetch time never shows a negative age.
+        XCTAssertEqual(UsageMath.formatAgoShort(since: now.addingTimeInterval(30), now: now), "0s")
+    }
+
     func testTimeFractionMidWindow() {
         // 2h remaining in a 5h window → 3h elapsed → 60%.
         let resets = now.addingTimeInterval(2 * 3600)
@@ -87,7 +103,27 @@ final class UsageMathTests: XCTestCase {
     func testSpendFraction() {
         XCTAssertEqual(UsageMath.spendFraction(usedCents: 24955, limitCents: 50000), 0.4991, accuracy: 1e-9)
         XCTAssertEqual(UsageMath.spendFraction(usedCents: 60000, limitCents: 50000), 1.2, accuracy: 1e-9)   // not clamped above 1
-        XCTAssertEqual(UsageMath.spendFraction(usedCents: 100, limitCents: 0), 0)         // no limit → 0
+        // No budget → binary ring: empty at $0, full above.
+        XCTAssertEqual(UsageMath.spendFraction(usedCents: 0, limitCents: 0), 0)
+        XCTAssertEqual(UsageMath.spendFraction(usedCents: 100, limitCents: 0), 1)
+    }
+
+    func testSpendStatus() {
+        // Positive budget: compare spend pace against elapsed month.
+        // spend 40% vs time 60% → ratio 0.67 → ok.
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 40, limitCents: 100, timeFraction: 0.6), .ok)
+        // spend 50% vs time 60% → ratio 0.83 → warning.
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 50, limitCents: 100, timeFraction: 0.6), .warning)
+        // spend 70% vs time 60% → ratio 1.17 → over.
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 70, limitCents: 100, timeFraction: 0.6), .over)
+        // Exactly on pace (ratio 1.0) is not yet over.
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 60, limitCents: 100, timeFraction: 0.6), .warning)
+        // Start of month (no time elapsed): any spend outpaces time.
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 1, limitCents: 100, timeFraction: 0), .over)
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 0, limitCents: 100, timeFraction: 0), .ok)
+        // No budget: any spend at all is over; $0 is ok.
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 0, limitCents: 0, timeFraction: 0.5), .ok)
+        XCTAssertEqual(UsageMath.spendStatus(usedCents: 1, limitCents: 0, timeFraction: 0.5), .over)
     }
 
     func testUsageRatePoints() {

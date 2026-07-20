@@ -88,9 +88,29 @@ enum UsageMath {
     /// Fraction for the combined spend circle where 1.0 == 100%: total spend across
     /// providers over the user's spend total (always set, defaulting to $2500). Not
     /// clamped above 1 — it can read ≥100% in text; the pie clamps it for drawing.
+    ///
+    /// A $0 budget has no meaningful denominator, so the ring goes binary: empty at
+    /// $0, full above. The time wedge behind it stays useful either way.
     static func spendFraction(usedCents: Double, limitCents: Double) -> Double {
-        guard limitCents > 0 else { return 0 }
+        guard limitCents > 0 else { return usedCents > 0 ? 1 : 0 }
         return max(0, usedCents / limitCents)
+    }
+
+    /// Whether spending is on pace, running warm, or over — driving the pace-colored
+    /// spend text (neutral / amber / red). With a positive budget it compares the
+    /// spend fraction against how much of the month has elapsed (`timeFraction`):
+    /// over when spend % exceeds time %, warm when spend is past 80% of the time pace.
+    /// With a $0 budget there's no pace to measure, so any spend at all reads as over.
+    enum SpendStatus { case ok, warning, over }
+
+    static func spendStatus(usedCents: Double, limitCents: Double, timeFraction: Double) -> SpendStatus {
+        guard limitCents > 0 else { return usedCents > 0 ? .over : .ok }
+        let spendFrac = usedCents / limitCents
+        guard timeFraction > 0 else { return spendFrac > 0 ? .over : .ok }
+        let ratio = spendFrac / timeFraction
+        if ratio > 1.0 { return .over }
+        if ratio > 0.8 { return .warning }
+        return .ok
     }
 
     /// Highest per-minute consumption rate across a cumulative series, and when it
@@ -183,32 +203,23 @@ enum UsageMath {
         String(format: "$%.2f", cents / 100)
     }
 
-    /// Wall-clock time only, e.g. "12:15 PM".
-    static func formatClockTime(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "h:mm a"
-        return f.string(from: date)
-    }
-
     /// Compact lowercased time, e.g. "1:00pm" (for the recent-peak readout).
     static func formatClockCompact(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "h:mma"
         return f.string(from: date).lowercased()
     }
 
-    /// "just now", "2m ago", "1h 5m ago", "1d 2h ago".
-    static func formatAgo(since date: Date, now: Date = Date()) -> String {
-        let diff = now.timeIntervalSince(date)
-        if diff < 45 { return "just now" }
-        let totalMinutes = Int((diff / 60).rounded())
-        if totalMinutes < 1 { return "just now" }
-        if totalMinutes < 60 { return "\(totalMinutes)m ago" }
-        let totalHours = totalMinutes / 60
-        if totalHours < 24 {
-            let minutes = totalMinutes % 60
-            return minutes > 0 ? "\(totalHours)h \(minutes)m ago" : "\(totalHours)h ago"
-        }
-        let days = totalHours / 24, hours = totalHours % 24
-        return hours > 0 ? "\(days)d \(hours)h ago" : "\(days)d ago"
+    /// Compact single-unit "time since", e.g. "47s", "3m", "2h", "1d" — for the
+    /// per-provider "Updated: …" line in the header, where space is tight and the
+    /// leading unit is all the user needs. Sub-second (or future) reads as "0s".
+    static func formatAgoShort(since date: Date, now: Date = Date()) -> String {
+        let diff = max(0, now.timeIntervalSince(date))
+        if diff < 60 { return "\(Int(diff))s" }
+        let minutes = Int(diff / 60)
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h" }
+        return "\(hours / 24)d"
     }
 
     private static func clamp01(_ x: Double) -> Double { min(1, max(0, x)) }

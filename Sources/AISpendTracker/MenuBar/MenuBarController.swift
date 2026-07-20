@@ -4,7 +4,9 @@ import AppKit
 /// menu is rebuilt from the current `TrayViewModel`: an app title, the big rings
 /// header (which now carries all the per-window detail), a status line only for
 /// providers that errored or haven't fetched, a combined spend section, then the
-/// footer (Providers submenu, updated line, Open at Login / Refresh / Restart / Quit).
+/// footer (Providers submenu, Open at Login / Refresh / Restart / Quit). Each header
+/// column carries its own "Updated: …" age; clicking a provider's copies its last raw
+/// response.
 ///
 /// The tray image and header render the **snapshot as of each provider's last
 /// fetch** (see `PieChart.circles`), so the time arc isn't misrepresented by drift;
@@ -42,6 +44,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         appearanceObserver = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.redraw(now: Date()) }
         }
+        ringsHeader.onCopyRawResponse = { [weak self] raw in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(raw, forType: .string)
+            Log.log("copied last raw response to clipboard (\(raw.count) chars)")
+            self?.menu.cancelTracking()
+        }
         rebuildMenu(now: Date())
         redraw(now: Date())
     }
@@ -55,15 +63,81 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         redraw(now: Date())
     }
 
-    /// Repaint the tray icon from the current view model.
+    /// Repaint the tray icon from the current view model. The provider pies are always
+    /// drawn as the button image; combined spend follows `spendDisplayMode` — a pie in
+    /// the image (`.circle`), a pace-colored dollar title beside it (`.text`), or
+    /// nothing (`.off`).
     private func redraw(now: Date) {
         guard let button = statusItem.button else { return }
         let isDark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        button.image = PieChart.trayImage(from: vm, now: now, outline: PieChart.outline(forDark: isDark))
+        let circles = PieChart.circles(from: vm, now: now, includeSpend: vm.spendDisplayMode == .circle)
+        let title = spendTitle(now: now, isDark: isDark)
+
+        // Everything is composited into the single button image (pies, then the spend
+        // text in `.text` mode), so we control the spacing exactly — a small left gap
+        // before the text and no trailing padding. Using the button's own title instead
+        // would add an uncontrollable gap and a right margin.
+        button.image = composeTrayImage(circles: circles, title: title, outline: PieChart.outline(forDark: isDark))
+        button.imagePosition = .imageOnly
+        button.attributedTitle = NSAttributedString(string: "")
+
         let errored = vm.providers.filter { $0.error != nil }.map(\.displayName)
         button.image?.accessibilityDescription = errored.isEmpty
             ? "AI usage across \(vm.providers.count) provider(s)"
             : "AI usage — fetch failed for: \(errored.joined(separator: ", "))"
+    }
+
+    /// Left gap between the provider pies and the spend text in `.text` mode. There is
+    /// deliberately no matching right margin — the image ends flush with the text.
+    private static let spendTextLeftMargin: CGFloat = 4
+
+    /// The final tray image: the provider pies, plus the spend dollar text laid out to
+    /// their right when `title` is set. When there are pies the text is offset by
+    /// `spendTextLeftMargin`; the image's right edge sits flush against the text (no
+    /// trailing padding). With no title this is just the pies (or the empty-ring
+    /// placeholder when nothing is enabled).
+    private func composeTrayImage(circles: [PieChart.Circle], title: NSAttributedString?,
+                                  outline: NSColor) -> NSImage {
+        guard let title else { return PieChart.image(circles: circles, outline: outline) }
+
+        // Only draw the pies when there are real circles — otherwise the placeholder
+        // ring would sit as a stray dot beside the text.
+        let pies = circles.isEmpty ? nil : PieChart.image(circles: circles, outline: outline)
+        let piesSize = pies?.size ?? .zero
+        let textSize = title.size()
+        let textWidth = ceil(textSize.width)
+        let width = piesSize.width + Self.spendTextLeftMargin + textWidth
+        let height = max(piesSize.height, ceil(textSize.height))
+
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+            if let pies {
+                pies.draw(at: NSPoint(x: 0, y: (height - piesSize.height) / 2),
+                          from: .zero, operation: .sourceOver, fraction: 1)
+            }
+            title.draw(at: NSPoint(x: piesSize.width + Self.spendTextLeftMargin,
+                                   y: (height - textSize.height) / 2))
+            return true
+        }
+        image.isTemplate = false   // keep the pace color, not a monochrome template
+        return image
+    }
+
+    /// The combined-spend dollar figure for the menu bar, colored by pace, or nil when
+    /// spend isn't shown as text (or there's no spend yet). Neutral is adaptive — white
+    /// on a dark bar, dark on a light one — so it stays legible either way.
+    private func spendTitle(now: Date, isDark: Bool) -> NSAttributedString? {
+        guard vm.spendDisplayMode == .text, vm.hasAnySpend else { return nil }
+        let cents = vm.combinedSpendCents
+        let timeFraction = UsageMath.monthTimeFraction(now: vm.latestUpdate ?? now)
+        let color: NSColor
+        switch UsageMath.spendStatus(usedCents: cents, limitCents: vm.customLimitCents, timeFraction: timeFraction) {
+        case .ok:      color = NSColor(white: isDark ? 1 : 0, alpha: 1)
+        case .warning: color = .systemOrange
+        case .over:    color = .systemRed
+        }
+        return NSAttributedString(string: UsageMath.formatDollars(cents), attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
+            .foregroundColor: color])
     }
 
     // Refresh countdowns/ago against the live clock each time the menu opens.
@@ -100,7 +174,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         if vm.hasAnySpend { addSpendSection(); menu.addItem(.separator()) }
 
-        addFooter(now: now)
+        addFooter()
     }
 
     /// A status line for a provider that isn't drawing healthy columns — an error
@@ -146,8 +220,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(titleItem)
     }
 
-    /// The combined spend section: total spend, per-provider breakdown, the spend
-    /// budget, and "Set Spend Budget…".
+    /// The combined spend readout: total spent (against the budget, when one is set)
+    /// and the per-provider breakdown. The controls (display mode, Set Budget) live in
+    /// the always-reachable footer "Spend" submenu instead.
     private func addSpendSection() {
         let title = Self.disabledItem("Spend (Month-to-Date)")
         title.attributedTitle = NSAttributedString(string: "Spend (Month-to-Date)", attributes: [
@@ -155,31 +230,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(title)
 
         let total = vm.combinedSpendCents
-        let pct = Int((UsageMath.spendFraction(usedCents: total, limitCents: vm.customLimitCents) * 100).rounded())
-        menu.addItem(Self.disabledItem(
-            "\(UsageMath.formatDollars(total)) spent · \(pct)% of \(UsageMath.formatDollars(vm.customLimitCents))"))
+        let summary: String
+        if vm.customLimitCents > 0 {
+            let pct = Int((UsageMath.spendFraction(usedCents: total, limitCents: vm.customLimitCents) * 100).rounded())
+            summary = "\(UsageMath.formatDollars(total)) spent · \(pct)% of \(UsageMath.formatDollars(vm.customLimitCents))"
+        } else {
+            summary = "\(UsageMath.formatDollars(total)) spent · no budget set"
+        }
+        menu.addItem(Self.disabledItem(summary))
 
         for p in vm.providers {
             if let spend = p.snapshot?.spend {
                 menu.addItem(Self.disabledItem("  \(spend.label): \(UsageMath.formatDollars(spend.usedCents))"))
             }
         }
-
-        let setLimit = NSMenuItem(title: "Set Spend Budget…", action: #selector(setCustomLimit), keyEquivalent: "")
-        setLimit.target = self
-        menu.addItem(setLimit)
     }
 
-    private func addFooter(now: Date) {
-        if let updated = vm.latestUpdate {
-            menu.addItem(Self.disabledItem(
-                "Updated \(UsageMath.formatClockTime(updated)) · \(UsageMath.formatAgo(since: updated, now: now))"))
-        } else if !vm.providers.isEmpty {
-            // Providers enabled but nothing fetched yet. With none enabled there's
-            // nothing to update, so show nothing.
-            menu.addItem(Self.disabledItem("Updating…"))
-        }
-
+    private func addFooter() {
         let providers = NSMenuItem(title: "Providers", action: nil, keyEquivalent: "")
         let sub = NSMenu()
         for id in ProviderID.allCases {
@@ -192,6 +259,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         providers.submenu = sub
         menu.addItem(providers)
+
+        addSpendSubmenu()
 
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         login.target = self
@@ -207,6 +276,32 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
+    /// The always-reachable "Spend" submenu: a Ring/Text/Off radio group for how spend
+    /// shows in the bar, then "Set Spend Budget…". Present even before any spend
+    /// arrives, so the mode can be pre-set.
+    private func addSpendSubmenu() {
+        let spend = NSMenuItem(title: "Spend", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        for (mode, label) in Self.spendDisplayLabels {
+            let item = NSMenuItem(title: label, action: #selector(setSpendDisplay(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = vm.spendDisplayMode == mode ? .on : .off
+            sub.addItem(item)
+        }
+        sub.addItem(.separator())
+        let setLimit = NSMenuItem(title: "Set Spend Budget…", action: #selector(setCustomLimit), keyEquivalent: "")
+        setLimit.target = self
+        sub.addItem(setLimit)
+        spend.submenu = sub
+        menu.addItem(spend)
+    }
+
+    /// Radio labels for the spend display modes, in menu order.
+    private static let spendDisplayLabels: [(SpendDisplayMode, String)] = [
+        (.circle, "Ring"), (.text, "Text"), (.off, "Off"),
+    ]
+
     // MARK: - Actions
 
     @objc private func refresh() { onRefresh?() }
@@ -216,6 +311,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func toggleProvider(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let id = ProviderID(rawValue: raw) else { return }
         onSetProvider?(id, sender.state != .on)
+    }
+
+    /// Switch how spend renders in the bar, persist it, and repaint.
+    @objc private func setSpendDisplay(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let mode = SpendDisplayMode(rawValue: raw) else { return }
+        Settings.spendDisplayMode = mode
+        vm.spendDisplayMode = mode
+        Log.log("spend: display mode = \(mode.rawValue)")
+        rebuildMenu(now: Date())
+        redraw(now: Date())
     }
 
     @objc private func copyError(_ sender: NSMenuItem) {
@@ -229,10 +334,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func setCustomLimit() {
         let alert = NSAlert()
         alert.messageText = "Set Spend Budget"
-        alert.informativeText = "Enter the dollar amount the combined spend pie fills toward."
+        alert.informativeText = "Enter the dollar amount the combined spend pie fills toward. "
+            + "Enter 0 for no budget — the ring then just flags any spend at all (empty at $0, full above)."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
         field.stringValue = String(format: "%.2f", vm.customLimitCents / 100)
-        field.placeholderString = "e.g. 2500.00"
+        field.placeholderString = "e.g. 2500.00 (or 0 for none)"
         alert.accessoryView = field
         alert.addButton(withTitle: "Set")
         alert.addButton(withTitle: "Cancel")
@@ -244,10 +350,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             .replacingOccurrences(of: "$", with: "")
             .replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespaces)
-        guard let dollars = Double(cleaned), dollars > 0, dollars.isFinite else {
+        guard let dollars = Double(cleaned), dollars >= 0, dollars.isFinite else {
             let err = NSAlert()
             err.messageText = "Invalid amount"
-            err.informativeText = "Please enter a positive dollar amount, e.g. 2500 or 2499.95."
+            err.informativeText = "Please enter a dollar amount of 0 or more, e.g. 2500, 2499.95, or 0."
             NSApp.activate(ignoringOtherApps: true)
             err.runModal()
             return

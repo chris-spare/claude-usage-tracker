@@ -9,10 +9,34 @@ protocol UsageProvider: Sendable {
     var displayName: String { get }
     /// Recommended seconds between fetches; the poller never fetches faster.
     var suggestedInterval: TimeInterval { get }
-    func fetch() async throws -> ProviderSnapshot
+    func fetch() async throws -> FetchResult
     /// Turn a fetch error into a short, user-facing message and whether it's
     /// permanent (stop polling this provider) or transient (retry next cooldown).
     func classify(_ error: Error) -> (message: String, permanent: Bool)
+}
+
+/// A completed fetch: the parsed snapshot plus the exact response body it was parsed
+/// from. The raw body is retained so the user can copy it for debugging / error
+/// reports (each provider makes a single request, so this is unambiguous).
+struct FetchResult {
+    let snapshot: ProviderSnapshot
+    let raw: String
+}
+
+/// An error that carries the raw provider response (or diagnostic text) it arose
+/// from, so the poller can persist it as the provider's "last response" for copying.
+/// Errors with no body (e.g. a missing credential) simply don't conform, and the
+/// poller falls back to the human-readable message.
+protocol RawResponseCarrying {
+    var rawResponse: String { get }
+}
+
+/// A response we received but couldn't turn into a snapshot. Preserves both the raw
+/// body (for copying) and the underlying decode error, so `classify` still reports it
+/// as a parse failure. Fetchers wrap decode errors in this to keep the body.
+struct ResponseParseError: Error, RawResponseCarrying {
+    let rawResponse: String
+    let underlying: Error
 }
 
 /// Fixed demo data for UI review — no network, no Keychain. Reset times are anchored
@@ -38,6 +62,8 @@ struct MockProvider: UsageProvider {
                                 timeBasis: .rollingWindow(length: WindowLength.fiveHour)),
                     UsageWindow(caption: "7-Day", utilization: 54, resetsAt: sevenReset,
                                 timeBasis: .rollingWindow(length: WindowLength.sevenDay)),
+                    UsageWindow(caption: "Fable 7-Day", utilization: 12, resetsAt: sevenReset,
+                                timeBasis: .rollingWindow(length: WindowLength.sevenDay), isScoped: true),
                 ],
                 spend: SpendInfo(usedCents: 12345, apiLimitCents: 50000, label: "Claude extra usage"))
         case .codex:
@@ -65,7 +91,9 @@ struct MockProvider: UsageProvider {
         }
     }
 
-    func fetch() async throws -> ProviderSnapshot { snapshot }
+    func fetch() async throws -> FetchResult {
+        FetchResult(snapshot: snapshot, raw: "{\"mock\": \"\(id.rawValue)\"}")
+    }
     func classify(_ error: Error) -> (message: String, permanent: Bool) {
         (error.localizedDescription, false)
     }

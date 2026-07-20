@@ -30,6 +30,12 @@ enum PieChart {
     static let spendPalette = Palette(usage: NSColor(srgbRed: 240 / 255, green: 76 / 255, blue: 76 / 255, alpha: 1),
                                       time: NSColor(white: 0.5, alpha: 1))
 
+    /// Claude's per-model scoped windows (e.g. "Fable 7-Day") render golden-amber so
+    /// they read as distinct from the primary 5-hour/7-day windows, which keep Claude's
+    /// orange. #E0A82E — a warm, saturated gold that sits harmoniously beside the brand
+    /// colors; its 60%-dimmed time wedge lands on a rich bronze rather than muddy olive.
+    static let scopedPalette = make(224, 168, 46)
+
     private static func make(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> Palette {
         Palette(usage: NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1),
                 time: NSColor(srgbRed: r / 255 * 0.6, green: g / 255 * 0.6, blue: b / 255 * 0.6, alpha: 1))
@@ -80,6 +86,10 @@ enum PieChart {
             case error
         }
         var kind: Kind
+        /// The provider's last raw response body, or nil for the combined spend circle
+        /// (and providers that haven't recorded one). Header-only: makes the column's
+        /// "Updated" row copyable. Unused by the tray image.
+        var rawResponse: String?
         /// Optional line drawn above the caption in the dropdown header: the provider
         /// name for a window/error circle, or the dollar value for the spend circle.
         /// Unused by the tray image.
@@ -93,21 +103,28 @@ enum PieChart {
         /// When this window/pie next resets (nil for an idle window). Drives the
         /// header column's "Reset: …" lines, computed live against the clock.
         var resetsAt: Date?
+        /// When this circle's provider last fetched successfully — drives the header
+        /// column's live "Updated: …" line. For the spend circle it's the newest fetch
+        /// across providers. Header-only.
+        var lastUpdated: Date?
         /// Hover text for the pie (projected end-of-window usage) and the sparkline
         /// (recent peak rate), or nil when there isn't enough signal. Header-only.
         var pieTooltip: String?
         var sparkTooltip: String?
 
-        init(kind: Kind, heading: String? = nil, caption: String,
+        init(kind: Kind, rawResponse: String? = nil, heading: String? = nil, caption: String,
              usageColor: NSColor, timeColor: NSColor, spark: [(Date, Double)] = [],
-             resetsAt: Date? = nil, pieTooltip: String? = nil, sparkTooltip: String? = nil) {
+             resetsAt: Date? = nil, lastUpdated: Date? = nil,
+             pieTooltip: String? = nil, sparkTooltip: String? = nil) {
             self.kind = kind
+            self.rawResponse = rawResponse
             self.heading = heading
             self.caption = caption
             self.usageColor = usageColor
             self.timeColor = timeColor
             self.spark = spark
             self.resetsAt = resetsAt
+            self.lastUpdated = lastUpdated
             self.pieTooltip = pieTooltip
             self.sparkTooltip = sparkTooltip
         }
@@ -120,30 +137,37 @@ enum PieChart {
     /// Each window's time wedge is computed at *that provider's* last-fetch moment
     /// (`lastUpdated`), not the live clock, so time never races ahead of the frozen
     /// usage reading and the time-vs-usage comparison stays fair between fetches.
-    static func circles(from vm: TrayViewModel, now: Date = Date()) -> [Circle] {
+    ///
+    /// `includeSpend` gates the trailing spend pie: the tray drops it in text/off
+    /// display mode (the figure is drawn as the button title instead, or hidden),
+    /// while the dropdown header always passes `true` to keep the rich spend column.
+    static func circles(from vm: TrayViewModel, now: Date = Date(), includeSpend: Bool = true) -> [Circle] {
         var out: [Circle] = []
         for p in vm.providers {
             let pal = palette(for: p.id)
             if p.error != nil {
-                out.append(Circle(kind: .error, heading: p.displayName, caption: "unavailable",
-                                  usageColor: pal.usage, timeColor: pal.time))
+                out.append(Circle(kind: .error, rawResponse: p.lastRawResponse,
+                                  heading: p.displayName, caption: "unavailable",
+                                  usageColor: pal.usage, timeColor: pal.time, lastUpdated: p.lastUpdated))
             } else if let snap = p.snapshot {
                 let at = p.lastUpdated ?? now
                 for w in snap.windows {
                     let series = p.series(forWindow: w.caption)
+                    let wpal = w.isScoped ? scopedPalette : pal
                     out.append(Circle(
                         kind: .pie(time: UsageMath.timeFraction(w.timeBasis, resetsAt: w.resetsAt, now: at),
                                    usage: UsageMath.usageFraction(utilization: w.utilization)),
-                        heading: p.displayName, caption: w.caption,
-                        usageColor: pal.usage, timeColor: pal.time,
+                        rawResponse: p.lastRawResponse, heading: p.displayName, caption: w.caption,
+                        usageColor: wpal.usage, timeColor: wpal.time,
                         spark: series,
                         resetsAt: w.resetsAt,
+                        lastUpdated: p.lastUpdated,
                         pieTooltip: UsageMath.projectedText(w, now: at),
                         sparkTooltip: UsageMath.recentPeakText(series, unit: .percent)))
                 }
             }
         }
-        if vm.hasAnySpend {
+        if includeSpend && vm.hasAnySpend {
             out.append(Circle(
                 kind: .pie(time: UsageMath.monthTimeFraction(now: vm.latestUpdate ?? now),
                            usage: UsageMath.spendFraction(usedCents: vm.combinedSpendCents,
@@ -152,6 +176,7 @@ enum PieChart {
                 usageColor: spendPalette.usage, timeColor: spendPalette.time,
                 spark: vm.spendSeries,
                 resetsAt: UsageMath.monthResetDate(now: now),
+                lastUpdated: vm.latestUpdate,
                 sparkTooltip: UsageMath.recentPeakText(vm.spendSeries, unit: .dollars)))
         }
         return out

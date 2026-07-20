@@ -60,4 +60,20 @@ final class UsageStoreTests: XCTestCase {
         Settings.enabledProviders = []
         XCTAssertEqual(Settings.enabledProviders, [])
     }
+
+    /// The spend display mode defaults to the pie ring and round-trips otherwise.
+    func testSpendDisplayMode() {
+        let key = "aiut.spendDisplayMode"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertEqual(Settings.spendDisplayMode, .circle)
+        Settings.spendDisplayMode = .text
+        XCTAssertEqual(Settings.spendDisplayMode, .text)
+        Settings.spendDisplayMode = .off
+        XCTAssertEqual(Settings.spendDisplayMode, .off)
+    }
 }

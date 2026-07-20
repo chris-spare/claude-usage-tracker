@@ -31,14 +31,19 @@ struct UsageWindow: Codable, Equatable {
     /// Whether an end-of-window projection is meaningful (rolling/interval windows
     /// where "on pace" makes sense). Providers without a stable pace set this false.
     var supportsProjection: Bool
+    /// A per-model scoped window (e.g. Claude's "Fable 7-Day") rather than one of the
+    /// account-wide primary windows. Rendered in a distinct color so it doesn't read
+    /// as another primary usage window.
+    var isScoped: Bool
 
     init(caption: String, utilization: Double, resetsAt: Date?,
-         timeBasis: TimeBasis, supportsProjection: Bool = true) {
+         timeBasis: TimeBasis, supportsProjection: Bool = true, isScoped: Bool = false) {
         self.caption = caption
         self.utilization = utilization
         self.resetsAt = resetsAt
         self.timeBasis = timeBasis
         self.supportsProjection = supportsProjection
+        self.isScoped = isScoped
     }
 }
 

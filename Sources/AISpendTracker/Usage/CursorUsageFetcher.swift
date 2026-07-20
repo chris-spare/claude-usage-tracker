@@ -28,12 +28,19 @@ final class CursorUsageFetcher: UsageProvider, @unchecked Sendable {
     /// The token wasn't a decodable JWT (can't derive the userId the cookie needs).
     struct MalformedTokenError: Error {}
     /// The endpoint returned the app's HTML shell rather than JSON — usually an
-    /// account type/route this scraping approach doesn't support yet.
-    struct UnsupportedResponseError: Error {}
+    /// account type/route this scraping approach doesn't support yet. Carries the
+    /// body so the user can copy and share it.
+    struct UnsupportedResponseError: Error, RawResponseCarrying {
+        let body: String
+        var rawResponse: String { body }
+    }
     /// The usage endpoint returned a non-2xx status.
-    struct UsageAPIError: Error { let status: Int; let body: String }
+    struct UsageAPIError: Error, RawResponseCarrying {
+        let status: Int; let body: String
+        var rawResponse: String { "HTTP \(status)\n\(body)" }
+    }
 
-    func fetch() async throws -> ProviderSnapshot {
+    func fetch() async throws -> FetchResult {
         let jwt = try readToken()
         let userId = try Self.userId(fromJWT: jwt)
 
@@ -46,23 +53,29 @@ final class CursorUsageFetcher: UsageProvider, @unchecked Sendable {
         req.httpBody = Data("{}".utf8)
 
         let (data, response) = try await URLSession.shared.data(for: req)
+        let raw = String(data: data, encoding: .utf8) ?? ""
         guard let http = response as? HTTPURLResponse else {
             throw UsageAPIError(status: -1, body: "no HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw UsageAPIError(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+            throw UsageAPIError(status: http.statusCode, body: raw)
         }
         // A 200 that's actually the Next.js app shell means the route/account isn't
         // supported for this scraping path — surface it distinctly.
-        if let text = String(data: data, encoding: .utf8),
-           text.trimmingCharacters(in: .whitespacesAndNewlines).first == "<" {
-            throw UnsupportedResponseError()
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).first == "<" {
+            throw UnsupportedResponseError(body: raw)
         }
-        return try Self.decode(data)
+        do {
+            return FetchResult(snapshot: try Self.decode(data), raw: raw)
+        } catch {
+            throw ResponseParseError(rawResponse: raw, underlying: error)
+        }
     }
 
     func classify(_ error: Error) -> (message: String, permanent: Bool) {
         switch error {
+        case let e as ResponseParseError:
+            return classify(e.underlying)
         case is NoCredentialsError:
             return ("Not signed in to Cursor (no Keychain token)", true)
         case is MalformedTokenError:

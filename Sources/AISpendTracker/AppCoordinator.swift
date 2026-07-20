@@ -9,6 +9,7 @@ import AppKit
 final class AppCoordinator: NSObject, NSApplicationDelegate {
     private let menuBar = MenuBarController()
     private let store = UsageStore()   // per-provider persisted last-fetch time + data
+    private let rawStore = RawResponseStore()   // per-provider last raw response (for copy)
 
     /// Set to `true` to develop the UI against fake data with no network/Keychain.
     private static let useMockData = false
@@ -21,6 +22,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         var snapshot: ProviderSnapshot?
         var lastUpdated: Date?
         var error: String?
+        var lastRawResponse: String?
     }
     private var runtimes: [ProviderID: Runtime] = [:]
 
@@ -59,21 +61,32 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         // restart within the cooldown isn't blank while we wait to re-fetch.
         runtimes[id] = Runtime(provider: provider, poller: poller,
                                history: UsageHistory(providerID: id),
-                               snapshot: store.snapshot(id), lastUpdated: store.lastFetchAt(id), error: nil)
+                               snapshot: store.snapshot(id), lastUpdated: store.lastFetchAt(id), error: nil,
+                               lastRawResponse: rawStore.raw(id))
 
         poller.onAttempt = { [weak self] at in self?.store.recordAttempt(id, at: at) }
-        poller.onData = { [weak self] snapshot in
+        poller.onData = { [weak self] snapshot, raw in
             guard let self else { return }
+            let at = Date()
             self.store.saveSnapshot(id, snapshot)
+            self.rawStore.record(id, raw: raw, at: at)
             self.runtimes[id]?.snapshot = snapshot
-            self.runtimes[id]?.lastUpdated = Date()
+            self.runtimes[id]?.lastUpdated = at
             self.runtimes[id]?.error = nil
+            self.runtimes[id]?.lastRawResponse = raw
             self.runtimes[id]?.history.record(snapshot)
             self.render()
         }
-        poller.onError = { [weak self] message in
-            self?.runtimes[id]?.error = message
-            self?.render()
+        poller.onError = { [weak self] message, raw in
+            guard let self else { return }
+            self.runtimes[id]?.error = message
+            // Persist the failing body when the response carried one, so "copy last
+            // response" surfaces the actual error payload rather than stale success.
+            if let raw {
+                self.rawStore.record(id, raw: raw, at: Date())
+                self.runtimes[id]?.lastRawResponse = raw
+            }
+            self.render()
         }
         poller.start()
     }
@@ -103,8 +116,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             guard let rt = runtimes[id] else { return nil }
             return ProviderView(id: id, displayName: rt.provider.displayName,
                                 snapshot: rt.snapshot, lastUpdated: rt.lastUpdated,
-                                error: rt.error, history: rt.history.recent())
+                                error: rt.error, history: rt.history.recent(),
+                                lastRawResponse: rt.lastRawResponse)
         }
-        menuBar.apply(TrayViewModel(providers: providers, customLimitCents: Settings.customLimitCents))
+        menuBar.apply(TrayViewModel(providers: providers, customLimitCents: Settings.customLimitCents,
+                                    spendDisplayMode: Settings.spendDisplayMode))
     }
 }

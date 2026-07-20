@@ -94,6 +94,91 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         XCTAssertNotNil(window(snap, "7-Day")?.resetsAt)
     }
 
+    /// The `limits` array drives the window list: a session + weekly pair plus a
+    /// per-model scoped weekly window, in array order, captioned "5-Hour", "7-Day",
+    /// "Fable 7-Day". `percent`/`resets_at` map to utilization/reset.
+    func testLimitsDriveWindowsIncludingScoped() throws {
+        let json = """
+        {
+          "five_hour": { "utilization": 37, "resets_at": "2026-07-20T20:50:00Z" },
+          "seven_day": { "utilization": 55, "resets_at": "2026-07-22T21:00:00Z" },
+          "limits": [
+            { "kind": "session", "group": "session", "percent": 37, "resets_at": "2026-07-20T20:50:00.4Z", "scope": null },
+            { "kind": "weekly_all", "group": "weekly", "percent": 55, "resets_at": "2026-07-22T21:00:00.4Z", "scope": null },
+            { "kind": "weekly_scoped", "group": "weekly", "percent": 12, "resets_at": "2026-07-22T21:00:00.4Z",
+              "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null } }
+          ]
+        }
+        """
+        let snap = try ClaudeUsageFetcher.decode(Data(json.utf8))
+        XCTAssertEqual(snap.windows.map(\.caption), ["5-Hour", "7-Day", "Fable 7-Day"])
+        XCTAssertEqual(window(snap, "Fable 7-Day")?.utilization, 12)
+        XCTAssertNotNil(window(snap, "Fable 7-Day")?.resetsAt)
+        // Only the per-model scoped window is flagged scoped; the account-wide pair isn't.
+        XCTAssertEqual(window(snap, "Fable 7-Day")?.isScoped, true)
+        XCTAssertEqual(window(snap, "5-Hour")?.isScoped, false)
+        XCTAssertEqual(window(snap, "7-Day")?.isScoped, false)
+    }
+
+    /// When the `limits` array omits a window (here: no scoped/Fable entry), no pie
+    /// is produced for it — existence is driven entirely by the JSON.
+    func testMissingScopedLimitOmitsItsPie() throws {
+        let json = """
+        {
+          "limits": [
+            { "kind": "session", "group": "session", "percent": 20, "resets_at": null, "scope": null },
+            { "kind": "weekly_all", "group": "weekly", "percent": 40, "resets_at": null, "scope": null }
+          ]
+        }
+        """
+        let snap = try ClaudeUsageFetcher.decode(Data(json.utf8))
+        XCTAssertEqual(snap.windows.map(\.caption), ["5-Hour", "7-Day"])
+    }
+
+    /// An unrecognized window group (one we can't size) is skipped rather than guessed.
+    func testUnknownLimitGroupIsSkipped() throws {
+        let json = """
+        {
+          "limits": [
+            { "kind": "session", "group": "session", "percent": 20, "resets_at": null, "scope": null },
+            { "kind": "monthly_all", "group": "monthly", "percent": 40, "resets_at": null, "scope": null }
+          ]
+        }
+        """
+        let snap = try ClaudeUsageFetcher.decode(Data(json.utf8))
+        XCTAssertEqual(snap.windows.map(\.caption), ["5-Hour"])
+    }
+
+    /// An idle scoped window (null percent + reset) reads as 0% usage, not a failure.
+    func testIdleScopedLimitReadsAsZero() throws {
+        let json = """
+        {
+          "limits": [
+            { "kind": "weekly_scoped", "group": "weekly", "percent": null, "resets_at": null,
+              "scope": { "model": { "display_name": "Fable" } } }
+          ]
+        }
+        """
+        let snap = try ClaudeUsageFetcher.decode(Data(json.utf8))
+        let fable = try XCTUnwrap(window(snap, "Fable 7-Day"))
+        XCTAssertEqual(fable.utilization, 0)
+        XCTAssertNil(fable.resetsAt)
+    }
+
+    /// With no `limits` array (older responses), the legacy top-level buckets still
+    /// render the core 5-hour + 7-day pair.
+    func testLegacyFallbackWithoutLimits() throws {
+        let json = """
+        {
+          "five_hour": { "utilization": 40, "resets_at": "2026-07-15T18:30:00Z" },
+          "seven_day": { "utilization": 63, "resets_at": "2026-07-16T14:00:00Z" }
+        }
+        """
+        let snap = try ClaudeUsageFetcher.decode(Data(json.utf8))
+        XCTAssertEqual(snap.windows.map(\.caption), ["5-Hour", "7-Day"])
+        XCTAssertEqual(window(snap, "7-Day")?.utilization, 63)
+    }
+
     /// A 401 body should surface the API's own error message, not a raw blob.
     func testAPIErrorUserMessageExtractsMessage() {
         let body = #"{"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"},"request_id":"req_x"}"#
@@ -112,5 +197,23 @@ final class ClaudeUsageFetcherTests: XCTestCase {
         XCTAssertTrue(f.classify(ClaudeUsageFetcher.NoOAuthCredentialsError()).permanent)
         XCTAssertFalse(f.classify(ClaudeUsageFetcher.KeychainError(detail: "locked")).permanent)
         XCTAssertFalse(f.classify(ClaudeUsageFetcher.UsageAPIError(status: 500, body: "")).permanent)
+    }
+
+    /// A decode failure wrapped in `ResponseParseError` still classifies as a parse
+    /// error (the wrapper defers to the underlying), and preserves the raw body so the
+    /// user can copy what the server actually sent.
+    func testParseErrorUnwrapsAndKeepsRaw() {
+        let f = ClaudeUsageFetcher()
+        let underlying = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad"))
+        let wrapped = ResponseParseError(rawResponse: "{not json", underlying: underlying)
+        XCTAssertEqual(f.classify(wrapped).message, f.classify(underlying).message)
+        XCTAssertFalse(f.classify(wrapped).permanent)
+        XCTAssertEqual((wrapped as RawResponseCarrying).rawResponse, "{not json")
+    }
+
+    /// An HTTP-error body is surfaced verbatim (with its status) for "copy last response".
+    func testAPIErrorCarriesRawResponse() {
+        let e = ClaudeUsageFetcher.UsageAPIError(status: 429, body: "slow down")
+        XCTAssertEqual((e as RawResponseCarrying).rawResponse, "HTTP 429\nslow down")
     }
 }

@@ -3,11 +3,14 @@ import AppKit
 /// A dropdown-menu header that shows a large version of the same circles drawn in
 /// the status bar, laid out side by side. Under each ring, top to bottom: a heading
 /// (the provider name, or the dollar value for the spend pie), the caption ("5-Hour",
-/// "Spend", …), "Usage: n%" / "Elapsed: n%" lines, a "Reset: …" countdown, and a
-/// column-width sparkline of that metric's recent rate. Hover tooltips carry the
-/// extra detail: projected usage on the pie, the absolute reset time on the reset
-/// line, and recent peak on the sparkline. Fed the same `PieChart.Circle` list as the
-/// tray image, so the two always agree. Draws nothing until `circles` is set.
+/// "Spend", …), "Usage: n%" / "Elapsed: n%" lines, a "Reset: …" countdown, a
+/// column-width sparkline of that metric's recent rate, and an "Updated: …" line (how
+/// long ago that provider last fetched). Hover tooltips carry the extra detail:
+/// projected usage on the pie, the absolute reset time on the reset line, and recent
+/// peak on the sparkline. Clicking a provider column's "Updated" line copies that
+/// provider's last raw response (for debugging / error reports). Fed the same
+/// `PieChart.Circle` list as the tray image, so the two always agree. Draws nothing
+/// until `circles` is set.
 @MainActor
 final class RingsHeaderView: NSView {
     /// The circles to render (in order); text/values/series come from each `Circle`.
@@ -18,6 +21,9 @@ final class RingsHeaderView: NSView {
             needsDisplay = true
         }
     }
+
+    /// Invoked with a provider's raw response body when its "Updated" row is clicked.
+    var onCopyRawResponse: ((String) -> Void)?
 
     // Layout (points).
     private let ringDiameter: CGFloat = 42
@@ -37,6 +43,8 @@ final class RingsHeaderView: NSView {
     private let statHeight: CGFloat = 13
     private let sparkTopGap: CGFloat = 6     // extra breathing room above the sparkline (~½ a text line)
     private let sparkHeight: CGFloat = 22
+    private let updatedTopGap: CGFloat = 6    // sparkline → "Updated: …" line
+    private let updatedHeight: CGFloat = 13
     private static let sparkGapThreshold: TimeInterval = 8 * 60
 
     private var groupWidth: CGFloat {
@@ -57,7 +65,8 @@ final class RingsHeaderView: NSView {
             + lineGap + statHeight   // Reset countdown
     }
     var preferredHeight: CGFloat {
-        topPad + ringDiameter + textBlockHeight + sparkTopGap + sparkHeight + bottomPad
+        topPad + ringDiameter + textBlockHeight + sparkTopGap + sparkHeight
+            + updatedTopGap + updatedHeight + bottomPad
     }
     private let bottomPad: CGFloat = 8
 
@@ -98,6 +107,16 @@ final class RingsHeaderView: NSView {
             y -= lineGap + captionHeight
             drawLine(circle.caption, attrs: Self.captionAttrs, columnX: colX, bottomY: y, height: captionHeight)
 
+            // "Updated: 3m ago" / "47s ago" — how long ago this provider last fetched.
+            // Drawn at a fixed slot below the sparkline band (whether or not a sparkline
+            // drew), and for error columns too, so every column's last-fetch age is
+            // visible and the row stays a stable click target for "copy last response".
+            if let updated = circle.lastUpdated {
+                drawLine("Updated: \(UsageMath.formatAgoShort(since: updated, now: now)) ago",
+                         attrs: Self.statAttrs, columnX: colX,
+                         bottomY: rects.updated.minY, height: updatedHeight)
+            }
+
             guard case .pie(let time, let usage) = circle.kind else { continue }
             y -= lineGap + statHeight
             // A maxed window (100%) shows its Usage line bright/bold instead of grayed.
@@ -121,9 +140,10 @@ final class RingsHeaderView: NSView {
         }
     }
 
-    /// The ring, reset-line, and sparkline frames for column `i`, derived purely from
-    /// the fixed layout so `draw` and `rebuildTooltips` place hover targets identically.
-    private func columnRects(index i: Int) -> (ring: NSRect, reset: NSRect, spark: NSRect) {
+    /// The ring, reset-line, sparkline, and updated-line frames for column `i`, derived
+    /// purely from the fixed layout so `draw`, `rebuildTooltips`, and click hit-testing
+    /// place their targets identically.
+    private func columnRects(index i: Int) -> (ring: NSRect, reset: NSRect, spark: NSRect, updated: NSRect) {
         let ringY = bounds.height - topPad - ringDiameter
         let colX = leftMargin + CGFloat(i) * (columnWidth + columnGap)
         let ring = NSRect(x: colX + (columnWidth - ringDiameter) / 2, y: ringY,
@@ -131,7 +151,9 @@ final class RingsHeaderView: NSView {
         let reset = NSRect(x: colX, y: ringY - textBlockHeight, width: columnWidth, height: statHeight)
         let spark = NSRect(x: colX, y: ringY - textBlockHeight - sparkTopGap - sparkHeight,
                            width: columnWidth, height: sparkHeight)
-        return (ring, reset, spark)
+        let updated = NSRect(x: colX, y: spark.minY - updatedTopGap - updatedHeight,
+                             width: columnWidth, height: updatedHeight)
+        return (ring, reset, spark, updated)
     }
 
     /// Live tooltip text keyed by the tag `addToolTip` returns. `addToolTip` does not
@@ -140,19 +162,38 @@ final class RingsHeaderView: NSView {
     /// messages a dangling pointer on hover.
     private var toolTipStrings: [NSView.ToolTipTag: String] = [:]
 
-    /// Hover tooltips for each column's pie (projected usage), reset line (absolute
-    /// reset time), and sparkline (recent peak). Rebuilt whenever `circles` changes.
+    /// Hover tooltips for each column's updated line (copy hint), pie (projected usage),
+    /// reset line (absolute reset time), and sparkline (recent peak). Rebuilt whenever
+    /// `circles` changes.
     private func rebuildTooltips() {
         removeAllToolTips()
         toolTipStrings.removeAll()
         guard !circles.isEmpty, bounds.height > 0 else { return }
         for (i, circle) in circles.enumerated() {
-            guard case .pie = circle.kind else { continue }
             let rects = columnRects(index: i)
+            if circle.rawResponse != nil {
+                addToolTip("Click to copy last response", in: rects.updated)
+            }
+            guard case .pie = circle.kind else { continue }
             addToolTip(circle.pieTooltip, in: rects.ring)
             addToolTip(resetTooltip(circle.resetsAt), in: rects.reset)
             if circle.spark.count >= 2 { addToolTip(circle.sparkTooltip, in: rects.spark) }
         }
+    }
+
+    /// A click on a provider column's "Updated" row copies that provider's last raw
+    /// response. Columns without a recorded response (the spend pie, a provider that
+    /// hasn't fetched) aren't click targets.
+    override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        for (i, circle) in circles.enumerated() {
+            guard let raw = circle.rawResponse else { continue }
+            if columnRects(index: i).updated.contains(point) {
+                onCopyRawResponse?(raw)
+                return
+            }
+        }
+        super.mouseUp(with: event)
     }
 
     /// Register one tooltip rect, owned by this view (see `toolTipStrings`). No-op when

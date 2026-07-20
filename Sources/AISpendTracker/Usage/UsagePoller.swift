@@ -17,10 +17,11 @@ final class UsagePoller {
     /// Called just before each network attempt, with its timestamp (persist this
     /// so the cooldown survives restarts).
     var onAttempt: ((Date) -> Void)?
-    /// Called with each successful fetch.
-    var onData: ((ProviderSnapshot) -> Void)?
-    /// Called with a short, user-facing message when a fetch fails.
-    var onError: ((String) -> Void)?
+    /// Called with each successful fetch: the snapshot plus the raw response body.
+    var onData: ((ProviderSnapshot, String) -> Void)?
+    /// Called when a fetch fails: a short user-facing message, and the raw response
+    /// body when the failure carried one (an HTTP error / unparseable body), else nil.
+    var onError: ((String, String?) -> Void)?
 
     init(provider: UsageProvider, lastAttemptAt: Date?) {
         self.provider = provider
@@ -69,15 +70,15 @@ final class UsagePoller {
         let provider = self.provider
         Task { [weak self] in
             do {
-                let snapshot = try await provider.fetch()
-                let summary = snapshot.windows.map { "\($0.caption)=\(Int($0.utilization))%" }.joined(separator: ", ")
+                let result = try await provider.fetch()
+                let summary = result.snapshot.windows.map { "\($0.caption)=\(Int($0.utilization))%" }.joined(separator: ", ")
                 Log.log("usage[\(provider.id.rawValue)]: fetched (\(summary.isEmpty ? "no windows" : summary))")
-                self?.onData?(snapshot)
+                self?.onData?(result.snapshot, result.raw)
                 self?.scheduleAfterAttempt()
             } catch {
                 let (message, permanent) = provider.classify(error)
                 Log.log("usage[\(provider.id.rawValue)]: fetch failed (\(permanent ? "permanent" : "will retry")): \(error)")
-                self?.onError?(message)
+                self?.onError?(message, (error as? RawResponseCarrying)?.rawResponse)
                 if permanent { self?.stop() } else { self?.scheduleAfterAttempt() }
             }
         }

@@ -50,19 +50,35 @@ final class UsageStore {
     }
 }
 
+/// How the combined spend is shown in the menu bar: as the pie ring (default), as a
+/// pace-colored dollar figure, or not at all. Only governs the tray glyph — the
+/// dropdown always keeps the rich spend ring.
+enum SpendDisplayMode: String, CaseIterable {
+    case circle, text, off
+}
+
 /// App preferences backed by UserDefaults.
 enum Settings {
     private static let customLimitKey = "aiut.customCostTotalCents"
     private static let enabledProvidersKey = "aiut.enabledProviders"
+    private static let spendDisplayKey = "aiut.spendDisplayMode"
 
     /// Default combined spend-pie total ($2500). Always set — the spend pie has a
     /// denominator even before the user customizes it.
     static let defaultCustomLimitCents: Double = 250_000
 
-    /// The dollar total (in cents) the combined spend pie fills against.
+    /// The dollar total (in cents) the combined spend pie fills against. May be 0,
+    /// which turns the spend ring into a plain "any spend at all" indicator (empty at
+    /// $0, full above) — see `UsageMath.spendFraction` / `spendStatus`.
     static var customLimitCents: Double {
         get { UserDefaults.standard.object(forKey: customLimitKey) as? Double ?? defaultCustomLimitCents }
         set { UserDefaults.standard.set(newValue, forKey: customLimitKey) }
+    }
+
+    /// How the combined spend renders in the menu bar (default: the pie ring).
+    static var spendDisplayMode: SpendDisplayMode {
+        get { SpendDisplayMode(rawValue: UserDefaults.standard.string(forKey: spendDisplayKey) ?? "") ?? .circle }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: spendDisplayKey) }
     }
 
     /// Which providers are shown. On first run — nothing persisted yet — all

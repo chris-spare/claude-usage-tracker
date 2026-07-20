@@ -46,11 +46,16 @@ Otherwise:
 
 ## Cutting a release
 
-Precondition: your code changes are already committed and pushed to `main`, and
-`git status` is clean.
+The commands below derive the app/zip/title from `Resources/Info.plist` and the
+build output, so they keep working if the app is renamed. Run them from the repo root.
+
+0. **Make sure the tree is releasable.** `git status` should be clean and pushed. If
+   there are uncommitted code changes, commit and push them first (a release should
+   correspond to a real commit on `main`) — or, if you're unsure whether they're ready,
+   ask the user before releasing.
 
 1. **Bump the version.** In `Resources/Info.plist`, increment `CFBundleShortVersionString`
-   (e.g. `0.2.1` → `0.2.2`) and `CFBundleVersion` (integer, +1). Commit and push:
+   (e.g. `0.2.2` → `0.2.3`) and `CFBundleVersion` (integer, +1). Commit and push:
    ```bash
    git add Resources/Info.plist
    git commit -m "Bump version to X.Y.Z"
@@ -64,34 +69,46 @@ Precondition: your code changes are already committed and pushed to `main`, and
    It builds the universal binary, signs with Developer ID, submits to Apple, waits
    for notarization, staples, and writes the distributable zip — printing its path at
    the end (`distributable: build/…zip`).
-   - **Notarization time is Apple-side and varies:** usually a few minutes,
-     occasionally 30–60 min when their queue is backed up. The script just waits.
+   - **This can run for up to ~an hour and looks idle while it waits on Apple.** Run it
+     in the background and do **not** kill it — notarization time is Apple-side (usually
+     a few minutes, occasionally 30–60 min when their queue is backed up).
    - **Don't run a debug build (`make-app.sh`) while this is in flight.** The release
      builds into `build/release/` to avoid a collision, and aborts if the signed
      bundle changes before stapling.
 
-3. **Verify the artifact** (the script checks internally; confirm independently if you like):
+   Derive the exact output paths from `Info.plist` — **don't glob `build/`**, it
+   accumulates stale `.app`s and `.zip`s from earlier builds/renames, so a glob
+   returns several matches. `CFBundleName` is the `.app`; `CFBundleExecutable` is the
+   zip stem and the inner binary. (These are also printed by the script at the end.)
+
+3. **Verify the artifact** (the script checks internally; confirm independently):
    ```bash
-   APP="build/release/AI Spend Tracker.app"   # or whatever the script printed
-   lipo -archs "$APP/Contents/MacOS/"*        # expect: x86_64 arm64
-   xcrun stapler validate "$APP"              # expect: The validate action worked!
-   spctl -a -vvv -t install "$APP"            # expect: accepted / source=Notarized Developer ID
+   NAME=$(/usr/libexec/PlistBuddy -c 'Print CFBundleName' Resources/Info.plist)
+   EXE=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' Resources/Info.plist)
+   APP="build/release/$NAME.app"
+   lipo -archs "$APP/Contents/MacOS/$EXE"   # expect: x86_64 arm64
+   xcrun stapler validate "$APP"            # expect: The validate action worked!
+   spctl -a -vvv -t install "$APP"          # expect: accepted / source=Notarized Developer ID
    ```
 
-4. **Publish the GitHub Release.** Tag `vX.Y.Z` matches the version; attach the zip the
-   script produced. Keep older releases — don't delete them.
+4. **Publish the GitHub Release.** Tag `vX.Y.Z` matches the version; keep older
+   releases — don't delete them.
    ```bash
-   gh release create vX.Y.Z \
-     "build/AISpendTracker.zip#AI Spend Tracker.app (universal, notarized)" \
+   NAME=$(/usr/libexec/PlistBuddy -c 'Print CFBundleName' Resources/Info.plist)
+   EXE=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' Resources/Info.plist)
+   VER=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)
+   gh release create "v$VER" \
+     "build/$EXE.zip#$NAME.app (universal, notarized)" \
      --repo chris-spare/claude-usage-tracker \
      --target main \
-     --title "AI Spend Tracker vX.Y.Z" \
+     --title "$NAME v$VER" \
      --notes "What changed, plus install steps."
    ```
 
 5. **Confirm the asset uploaded:**
    ```bash
-   gh release view vX.Y.Z --repo chris-spare/claude-usage-tracker \
+   VER=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)
+   gh release view "v$VER" --repo chris-spare/claude-usage-tracker \
      --json assets --jq '.assets[] | {name, state}'
    ```
 

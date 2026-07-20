@@ -8,7 +8,7 @@ plus a combined **spend** circle for pay-as-you-go usage.
 > **Codex** and **Cursor** are implemented but still need further real-world
 > testing — please report anything that looks off.
 
-![AI Spend Tracker menu](docs/screenshot.png)
+![AI Spend Tracker menu](docs/screenshot-v0.2.3.png)
 
 Each donut overlays two clockwise arcs from 12 o'clock: the elapsed **time** wedge
 (a darker shade, spanning the full radius) and the **usage** ring (the brighter

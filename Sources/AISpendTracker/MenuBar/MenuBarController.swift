@@ -89,7 +89,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     /// Left gap between the provider pies and the spend text in `.text` mode. There is
     /// deliberately no matching right margin — the image ends flush with the text.
-    private static let spendTextLeftMargin: CGFloat = 4
+    private static let spendTextLeftMargin: CGFloat = 6
 
     /// The final tray image: the provider pies, plus the spend dollar text laid out to
     /// their right when `title` is set. When there are pies the text is offset by
@@ -129,13 +129,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard vm.spendDisplayMode == .text, vm.hasAnySpend else { return nil }
         let cents = vm.combinedSpendCents
         let timeFraction = UsageMath.monthTimeFraction(now: vm.latestUpdate ?? now)
-        let color: NSColor
-        switch UsageMath.spendStatus(usedCents: cents, limitCents: vm.customLimitCents, timeFraction: timeFraction) {
-        case .ok:      color = NSColor(white: isDark ? 1 : 0, alpha: 1)
-        case .warning: color = .systemOrange
-        case .over:    color = .systemRed
-        }
-        return NSAttributedString(string: UsageMath.formatDollars(cents), attributes: [
+        let status = UsageMath.spendStatus(usedCents: cents, limitCents: vm.customLimitCents, timeFraction: timeFraction)
+        // Neutral adapts to the bar (white on dark, dark on light); the alert tints are
+        // shared with the dropdown spend column via PieChart.spendStatusColor.
+        let color = PieChart.spendStatusColor(status, neutral: NSColor(white: isDark ? 1 : 0, alpha: 1))
+        return NSAttributedString(string: UsageMath.formatDollarsRounded(cents), attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
             .foregroundColor: color])
     }

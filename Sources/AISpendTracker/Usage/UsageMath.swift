@@ -203,6 +203,12 @@ enum UsageMath {
         String(format: "$%.2f", cents / 100)
     }
 
+    /// Cents → "$43", rounded to the nearest dollar. Used for the compact tray glance;
+    /// the dropdown keeps cent precision via `formatDollars`.
+    static func formatDollarsRounded(_ cents: Double) -> String {
+        String(format: "$%.0f", (cents / 100).rounded())
+    }
+
     /// Compact lowercased time, e.g. "1:00pm" (for the recent-peak readout).
     static func formatClockCompact(_ date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "h:mma"

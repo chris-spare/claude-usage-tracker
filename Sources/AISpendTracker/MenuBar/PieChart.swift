@@ -97,6 +97,11 @@ enum PieChart {
         var caption: String
         var usageColor: NSColor
         var timeColor: NSColor
+        /// Color for the heading text in the dropdown header. Usually the usage color
+        /// (ties the column to its ring), but the spend column diverges: its ring sits
+        /// on a black disc (neutral = white) while the heading sits on the menu
+        /// background (neutral = the adaptive label color). Header-only.
+        var headingColor: NSColor
         /// Cumulative series (utilization % or spend cents, oldest first) feeding the
         /// per-column sparkline in the dropdown header. Unused by the tray image.
         var spark: [(Date, Double)]
@@ -113,7 +118,8 @@ enum PieChart {
         var sparkTooltip: String?
 
         init(kind: Kind, rawResponse: String? = nil, heading: String? = nil, caption: String,
-             usageColor: NSColor, timeColor: NSColor, spark: [(Date, Double)] = [],
+             usageColor: NSColor, timeColor: NSColor, headingColor: NSColor? = nil,
+             spark: [(Date, Double)] = [],
              resetsAt: Date? = nil, lastUpdated: Date? = nil,
              pieTooltip: String? = nil, sparkTooltip: String? = nil) {
             self.kind = kind
@@ -122,6 +128,7 @@ enum PieChart {
             self.caption = caption
             self.usageColor = usageColor
             self.timeColor = timeColor
+            self.headingColor = headingColor ?? usageColor
             self.spark = spark
             self.resetsAt = resetsAt
             self.lastUpdated = lastUpdated
@@ -168,18 +175,37 @@ enum PieChart {
             }
         }
         if includeSpend && vm.hasAnySpend {
+            let at = vm.latestUpdate ?? now
+            let status = UsageMath.spendStatus(usedCents: vm.combinedSpendCents,
+                                               limitCents: vm.customLimitCents,
+                                               timeFraction: UsageMath.monthTimeFraction(now: at))
             out.append(Circle(
-                kind: .pie(time: UsageMath.monthTimeFraction(now: vm.latestUpdate ?? now),
+                kind: .pie(time: UsageMath.monthTimeFraction(now: at),
                            usage: UsageMath.spendFraction(usedCents: vm.combinedSpendCents,
                                                           limitCents: vm.customLimitCents)),
                 heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Spend",
-                usageColor: spendPalette.usage, timeColor: spendPalette.time,
+                // The ring rides a black disc so its neutral is white; the heading text
+                // rides the menu background so its neutral is the adaptive label color.
+                usageColor: spendStatusColor(status, neutral: .white),
+                timeColor: spendPalette.time,
+                headingColor: spendStatusColor(status, neutral: .labelColor),
                 spark: vm.spendSeries,
                 resetsAt: UsageMath.monthResetDate(now: now),
                 lastUpdated: vm.latestUpdate,
                 sparkTooltip: UsageMath.recentPeakText(vm.spendSeries, unit: .dollars)))
         }
         return out
+    }
+
+    /// The pace color for a spend status — the shared mapping behind the spend ring,
+    /// the dropdown heading, and the menu-bar text so they never drift: warm → orange,
+    /// over → red, and on-pace → the caller's context-appropriate `neutral`.
+    static func spendStatusColor(_ status: UsageMath.SpendStatus, neutral: NSColor) -> NSColor {
+        switch status {
+        case .ok:      return neutral
+        case .warning: return .systemOrange
+        case .over:    return .systemRed
+        }
     }
 
     /// Compose the circles into one status-item image. `outline` is the hairline color

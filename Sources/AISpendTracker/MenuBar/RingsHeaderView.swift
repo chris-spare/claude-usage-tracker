@@ -100,7 +100,7 @@ final class RingsHeaderView: NSView {
                 // Bold, in the pie's highlight color, to tie the column to its ring.
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
-                    .foregroundColor: circle.usageColor,
+                    .foregroundColor: circle.headingColor,
                 ]
                 drawLine(heading, attrs: attrs, columnX: colX, bottomY: y, height: headingHeight)
             }

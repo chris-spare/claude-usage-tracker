@@ -16,7 +16,7 @@ enum PieChart {
     /// A provider's (or the spend pie's) two colors.
     struct Palette { let usage: NSColor; let time: NSColor }
 
-    /// Per-provider palette: usage ring in the brand color, time wedge at 60%
+    /// Per-provider palette: usage ring in the brand color, time wedge at 50%
     /// brightness. Claude #D97757, Codex #3D93D6, Cursor #AC7CE0.
     static func palette(for id: ProviderID) -> Palette {
         switch id {
@@ -33,12 +33,12 @@ enum PieChart {
     /// Claude's per-model scoped windows (e.g. "Fable 7-Day") render golden-amber so
     /// they read as distinct from the primary 5-hour/7-day windows, which keep Claude's
     /// orange. #E0A82E — a warm, saturated gold that sits harmoniously beside the brand
-    /// colors; its 60%-dimmed time wedge lands on a rich bronze rather than muddy olive.
+    /// colors; its 50%-dimmed time wedge lands on a rich bronze rather than muddy olive.
     static let scopedPalette = make(224, 168, 46)
 
     private static func make(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> Palette {
         Palette(usage: NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1),
-                time: NSColor(srgbRed: r / 255 * 0.6, green: g / 255 * 0.6, blue: b / 255 * 0.6, alpha: 1))
+                time: NSColor(srgbRed: r / 255 * 0.5, green: g / 255 * 0.5, blue: b / 255 * 0.5, alpha: 1))
     }
 
     // Untouched remainder — black.
@@ -66,8 +66,8 @@ enum PieChart {
     static let gap: CGFloat = 5
     static let outlineWidth: CGFloat = 0.5
     /// Inner edge of the usage ring, as a fraction of the pie radius (so the ring band
-    /// is the outer 1/5 of the radius).
-    static let ringInnerRatio: CGFloat = 0.8
+    /// is the outer 1/3 of the radius).
+    static let ringInnerRatio: CGFloat = 0.67
     /// Radius of the white "maxed out" center dot (drawn at 100%), as a fraction of the
     /// pie radius.
     static let fullDotRatio: CGFloat = 0.13
@@ -286,9 +286,18 @@ enum PieChart {
         // Time: a solid wedge spanning the whole radius (both lanes).
         fillWedge(center: center, radius: r, from: 0, to: time, color: timeColor)
         // Usage: a ring in the outer lane, over the time wedge. Clamped to one full turn
-        // so an over-100% reading (shown in the text) never overfills the pie.
+        // so an over-100% reading (shown in the text) never overfills the pie. A soft dark
+        // shadow cast under the ring lifts it off the time wedge behind it, sharpening the
+        // usage-vs-time contrast; the blur scales with the pie so it reads at any size.
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(white: 0, alpha: 0.6)
+        shadow.shadowBlurRadius = max(0.75, r * 0.12)
+        shadow.shadowOffset = .zero
+        shadow.set()
         fillRingWedge(center: center, innerRadius: r * ringInnerRatio, outerRadius: r,
                       from: 0, to: min(1, max(0, usage)), color: usageColor)
+        NSGraphicsContext.restoreGraphicsState()
 
         strokeOutline(center: center, radius: r, color: outline)
 

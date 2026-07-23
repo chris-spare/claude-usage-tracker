@@ -10,6 +10,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
     private let menuBar = MenuBarController()
     private let store = UsageStore()   // per-provider persisted last-fetch time + data
     private let rawStore = RawResponseStore()   // per-provider last raw response (for copy)
+    private let spendLedger = SpendLedger()   // reconstructs spend onto the local calendar month
 
     /// Set to `true` to develop the UI against fake data with no network/Keychain.
     private static let useMockData = false
@@ -23,6 +24,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         var lastUpdated: Date?
         var error: String?
         var lastRawResponse: String?
+        var reconstructedSpend: SpendLedger.Entry?
     }
     private var runtimes: [ProviderID: Runtime] = [:]
 
@@ -63,10 +65,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
         let poller = UsagePoller(provider: provider, lastAttemptAt: store.lastFetchAt(id))
         // Show the cached reading immediately (stamped with its real fetch time), so a
         // restart within the cooldown isn't blank while we wait to re-fetch.
+        // Show the persisted reconstruction on launch; do NOT re-ingest the cached
+        // snapshot (it was already folded into the ledger when first fetched — replaying
+        // it would double-count). A month rollover that happened while we were closed is
+        // corrected by the first fresh fetch's `ingest`.
         runtimes[id] = Runtime(provider: provider, poller: poller,
                                history: UsageHistory(providerID: id),
                                snapshot: store.snapshot(id), lastUpdated: store.lastFetchAt(id), error: nil,
-                               lastRawResponse: rawStore.raw(id))
+                               lastRawResponse: rawStore.raw(id),
+                               reconstructedSpend: spendLedger.entry(id))
 
         poller.onAttempt = { [weak self] at in self?.store.recordAttempt(id, at: at) }
         poller.onData = { [weak self] snapshot, raw in
@@ -79,6 +86,11 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             self.runtimes[id]?.error = nil
             self.runtimes[id]?.lastRawResponse = raw
             self.runtimes[id]?.history.record(snapshot)
+            // Fold this fresh reading into the calendar-month reconstruction (once per
+            // new sample, in order). Providers with no spend contribute nothing.
+            if let spend = snapshot.spend {
+                self.runtimes[id]?.reconstructedSpend = self.spendLedger.ingest(id, spend: spend, now: at)
+            }
             self.render()
         }
         poller.onError = { [weak self] message, raw in
@@ -121,7 +133,8 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             return ProviderView(id: id, displayName: rt.provider.displayName,
                                 snapshot: rt.snapshot, lastUpdated: rt.lastUpdated,
                                 error: rt.error, history: rt.history.recent(),
-                                lastRawResponse: rt.lastRawResponse)
+                                lastRawResponse: rt.lastRawResponse,
+                                reconstructedSpend: rt.reconstructedSpend)
         }
         menuBar.apply(TrayViewModel(providers: providers, customLimitCents: Settings.customLimitCents,
                                     spendDisplayMode: Settings.spendDisplayMode))

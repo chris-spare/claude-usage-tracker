@@ -26,7 +26,9 @@ final class CodexUsageFetcherTests: XCTestCase {
         XCTAssertNil(snap.spend)                                               // no individual_limit
     }
 
-    /// Paid plan: a 5-hour primary + weekly secondary, plus dollar-string overage.
+    /// Paid plan: a 5-hour primary + weekly secondary, plus a monthly workspace credit
+    /// pool. `individual_limit` is denominated in credits, valued at the estimated
+    /// 4¢/credit rate — here delivered as numeric strings.
     func testDecodePaidPlanWithOverage() throws {
         let json = """
         {
@@ -36,16 +38,31 @@ final class CodexUsageFetcherTests: XCTestCase {
             "secondary_window": { "used_percent": 62, "limit_window_seconds": 604800, "reset_at": 1787400000 }
           },
           "spend_control": { "reached": false,
-            "individual_limit": { "limit": "75.00", "used": "12.34", "remaining": "62.66" } }
+            "individual_limit": { "limit": "20000", "used": "1120", "remaining": "18880" } }
         }
         """
         let snap = try CodexUsageFetcher.decode(Data(json.utf8))
         XCTAssertEqual(snap.windows.map(\.caption), ["5-Hour", "Weekly"])
         XCTAssertEqual(snap.windows[0].utilization, 40)
         XCTAssertEqual(snap.windows[1].utilization, 62)
-        XCTAssertEqual(snap.spend?.usedCents, 1234)                            // "12.34" → cents
-        XCTAssertEqual(snap.spend?.apiLimitCents, 7500)
+        XCTAssertEqual(snap.spend?.usedCents, 4480)                            // 1120 credits × 4¢
+        XCTAssertEqual(snap.spend?.apiLimitCents, 80000)                       // 20000 credits × 4¢
         XCTAssertEqual(snap.spend?.label, "Codex overage")
+    }
+
+    /// The credit-pool figures may arrive as JSON numbers rather than strings; both
+    /// forms decode to the same estimated dollar value.
+    func testDecodeCreditPoolAsNumbers() throws {
+        let json = """
+        {
+          "plan_type": "team",
+          "rate_limit": { "primary_window": { "used_percent": 10, "limit_window_seconds": 604800, "reset_at": 1 }, "secondary_window": null },
+          "spend_control": { "individual_limit": { "limit": 20000, "used": 1120.5, "remaining": 18879.5 } }
+        }
+        """
+        let snap = try CodexUsageFetcher.decode(Data(json.utf8))
+        XCTAssertEqual(snap.spend?.usedCents, 4482)                            // 1120.5 credits × 4¢
+        XCTAssertEqual(snap.spend?.apiLimitCents, 80000)                       // 20000 credits × 4¢
     }
 
     /// A window without a length is skipped rather than producing a bogus pie.

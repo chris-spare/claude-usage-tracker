@@ -15,10 +15,14 @@ struct ProviderView {
     /// The provider's most recent raw response body, for the "copy last response"
     /// affordance. Nil until we've recorded one.
     var lastRawResponse: String?
+    /// The provider's spend reconstructed onto the user's local calendar month (see
+    /// `SpendLedger`). This — not `snapshot.spend.usedCents` — is what we display and
+    /// sum. Nil until the provider has reported spend at least once.
+    var reconstructedSpend: SpendLedger.Entry?
 
     init(id: ProviderID, displayName: String, snapshot: ProviderSnapshot? = nil,
          lastUpdated: Date? = nil, error: String? = nil, history: [UsageHistory.Sample] = [],
-         lastRawResponse: String? = nil) {
+         lastRawResponse: String? = nil, reconstructedSpend: SpendLedger.Entry? = nil) {
         self.id = id
         self.displayName = displayName
         self.snapshot = snapshot
@@ -26,6 +30,7 @@ struct ProviderView {
         self.error = error
         self.history = history
         self.lastRawResponse = lastRawResponse
+        self.reconstructedSpend = reconstructedSpend
     }
 }
 
@@ -38,9 +43,11 @@ struct TrayViewModel {
     /// How the combined spend renders in the tray (the dropdown always keeps the ring).
     var spendDisplayMode: SpendDisplayMode = .circle
 
-    /// Sum of every enabled provider's month-to-date spend (cents).
+    /// Sum of every enabled provider's spend for the current local calendar month —
+    /// the ledger's reconstructed figure, falling back to the provider's raw month-to-date
+    /// only when no reconstruction exists yet (e.g. mock/preview data).
     var combinedSpendCents: Double {
-        providers.compactMap { $0.snapshot?.spend?.usedCents }.reduce(0, +)
+        providers.compactMap { $0.reconstructedSpend?.monthSpendCents ?? $0.snapshot?.spend?.usedCents }.reduce(0, +)
     }
 
     /// Whether any enabled provider reports spend at all (gates the spend pie).

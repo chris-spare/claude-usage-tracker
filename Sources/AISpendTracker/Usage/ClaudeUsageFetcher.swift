@@ -188,8 +188,13 @@ final class ClaudeUsageFetcher: UsageProvider, @unchecked Sendable {
         }
         func parseExtra(_ e: Extra?) -> SpendInfo? {
             guard let e else { return nil }
+            // `used_credits`/`monthly_limit` are already in cents (minor units). Claude's
+            // payload carries NO reset timestamp for this monthly overage meter (verified
+            // against a live response: neither `extra_usage` nor the newer `spend` object
+            // has one), and Anthropic doesn't document the reset time/timezone — so we
+            // leave `cycleResetsAt` nil and the ledger falls back to value-drop detection.
             return SpendInfo(usedCents: e.used_credits ?? 0, apiLimitCents: e.monthly_limit,
-                             label: "Claude extra usage")
+                             label: "Claude extra usage", cycleResetsAt: nil)
         }
         let payload = try JSONDecoder().decode(Payload.self, from: data)
         let windows: [UsageWindow]

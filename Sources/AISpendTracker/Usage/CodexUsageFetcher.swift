@@ -10,7 +10,8 @@ import Foundation
 ///
 /// The payload carries `rate_limit.primary_window` / `secondary_window` (on paid
 /// plans a 5-hour + weekly pair; on the free plan a single ~30-day window) plus
-/// `spend_control.individual_limit` (pay-as-you-go overage) and `credits`.
+/// `spend_control.individual_limit` — the monthly workspace credit pool, reported
+/// in *credits* (not dollars), which we value at an estimated per-credit rate.
 final class CodexUsageFetcher: UsageProvider, @unchecked Sendable {
     let id: ProviderID = .codex
     let displayName = "Codex"
@@ -19,6 +20,12 @@ final class CodexUsageFetcher: UsageProvider, @unchecked Sendable {
     private static let usageURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
     private static let userAgent = "codex-usage-tray"
     private static let timeout: TimeInterval = 5
+
+    /// Codex reports the monthly workspace pool in credits, not dollars. The
+    /// workspace's own rate is ≈ US$0.04/credit (a CA$1,120 / 20,000-credit
+    /// allowance), i.e. 4 cents per credit. This is an estimate: treat the derived
+    /// dollar figures as approximate until Codex exposes billed amounts directly.
+    private static let centsPerCredit = 4.0
 
     /// `~/.codex/auth.json` is missing or has no access token — Codex isn't logged in.
     struct NoAuthError: Error {}
@@ -104,7 +111,18 @@ final class CodexUsageFetcher: UsageProvider, @unchecked Sendable {
             let reset_at: Double?
         }
         struct RateLimit: Decodable { let primary_window: Window?; let secondary_window: Window? }
-        struct SpendLimit: Decodable { let limit: String?; let used: String?; let remaining: String? }
+        // Codex encodes the credit-pool figures as either JSON numbers or numeric
+        // strings depending on plan/endpoint version; accept both.
+        struct FlexibleNumber: Decodable {
+            let value: Double
+            init(from decoder: Decoder) throws {
+                let c = try decoder.singleValueContainer()
+                if let n = try? c.decode(Double.self) { value = n }
+                else if let s = try? c.decode(String.self), let n = Double(s) { value = n }
+                else { throw DecodingError.dataCorruptedError(in: c, debugDescription: "expected number or numeric string") }
+            }
+        }
+        struct SpendLimit: Decodable { let limit: FlexibleNumber?; let used: FlexibleNumber?; let remaining: FlexibleNumber?; let reset_at: Double? }
         struct SpendControl: Decodable { let individual_limit: SpendLimit? }
         struct Payload: Decodable {
             let plan_type: String?
@@ -124,14 +142,19 @@ final class CodexUsageFetcher: UsageProvider, @unchecked Sendable {
         let windows = [payload.rate_limit?.primary_window, payload.rate_limit?.secondary_window]
             .compactMap(window)
 
-        // Overage: `individual_limit` carries dollar strings; contribute only when a
-        // limit is actually configured (nil on free plans → no spend).
+        // Overage: `individual_limit` reports the monthly workspace pool in credits
+        // (number or numeric string). Value it at the estimated per-credit rate, and
+        // contribute only when a limit is actually configured (nil on free plans → no
+        // spend).
         var spend: SpendInfo?
         if let limit = payload.spend_control?.individual_limit,
-           let usedDollars = limit.used.flatMap(Double.init) {
-            spend = SpendInfo(usedCents: usedDollars * 100,
-                              apiLimitCents: limit.limit.flatMap(Double.init).map { $0 * 100 },
-                              label: "Codex overage")
+           let usedCredits = limit.used?.value {
+            // `reset_at` is the credit pool's own cycle boundary — the ledger's
+            // authoritative reset signal for Codex spend.
+            spend = SpendInfo(usedCents: usedCredits * centsPerCredit,
+                              apiLimitCents: (limit.limit?.value).map { $0 * centsPerCredit },
+                              label: "Codex overage",
+                              cycleResetsAt: limit.reset_at.map { Date(timeIntervalSince1970: $0) })
         }
         return ProviderSnapshot(windows: windows, spend: spend)
     }

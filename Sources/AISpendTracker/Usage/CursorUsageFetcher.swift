@@ -158,10 +158,12 @@ final class CursorUsageFetcher: UsageProvider, @unchecked Sendable {
         let basis: TimeBasis = (start != nil && end != nil) ? .interval(start: start!, end: end!) : .none
         let window = UsageWindow(caption: "Monthly", utilization: utilization, resetsAt: end, timeBasis: basis)
 
-        // On-demand `used` is in cents.
+        // On-demand `used` is in cents. `billingCycleEnd` is when this on-demand meter
+        // rolls over — the ledger's authoritative reset signal for Cursor spend.
         var spend: SpendInfo?
         if let onDemand = payload.individualUsage?.onDemand {
-            spend = SpendInfo(usedCents: onDemand.used ?? 0, apiLimitCents: onDemand.limit, label: "Cursor on-demand")
+            spend = SpendInfo(usedCents: onDemand.used ?? 0, apiLimitCents: onDemand.limit,
+                              label: "Cursor on-demand", cycleResetsAt: end)
         }
         return ProviderSnapshot(windows: [window], spend: spend)
     }

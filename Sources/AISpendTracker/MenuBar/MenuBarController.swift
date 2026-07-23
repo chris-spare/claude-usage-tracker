@@ -291,10 +291,62 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(Self.disabledItem(summary))
 
         for p in vm.providers {
-            if let spend = p.snapshot?.spend {
-                menu.addItem(Self.disabledItem("  \(spend.label): \(UsageMath.formatDollars(spend.usedCents))"))
-            }
+            guard let spend = p.snapshot?.spend else { continue }
+            // Show the reconstructed calendar-month figure, not the raw provider reading;
+            // a ⚠︎ marks a month whose figure may be off (sticky until the next rollover —
+            // the "Spend Breakdown" submenu says why).
+            let cents = p.reconstructedSpend?.monthSpendCents ?? spend.usedCents
+            let warn = (p.reconstructedSpend?.isMonthUncertain ?? false) ? " ⚠︎" : ""
+            menu.addItem(Self.disabledItem("  \(spend.label): \(UsageMath.formatDollars(cents))\(warn)"))
         }
+        // The audit lives with the spend readout it explains, above the config rule.
+        addSpendBreakdownSubmenu()
+    }
+
+    /// A per-provider audit of how each spend figure was derived — the raw provider
+    /// reading shown next to every reconstruction input (carry-over, closed-cycle
+    /// contributions, the reset signal, sampling recency) — so a suspicious total can
+    /// always be traced back to the source data. See `SpendLedger`.
+    private func addSpendBreakdownSubmenu() {
+        let root = NSMenuItem(title: "Spend Breakdown", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        var any = false
+        for p in vm.providers {
+            guard let spend = p.snapshot?.spend else { continue }
+            any = true
+            let header = Self.disabledItem(p.displayName)
+            header.attributedTitle = NSAttributedString(string: p.displayName, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
+                .foregroundColor: PieChart.palette(for: p.id).usage])
+            sub.addItem(header)
+
+            if let e = p.reconstructedSpend {
+                sub.addItem(Self.disabledItem("  Counted this month: \(UsageMath.formatDollars(e.monthSpendCents))"))
+                sub.addItem(Self.disabledItem("  Provider reports (MTD): \(UsageMath.formatDollars(e.rawProviderCents))"))
+                if e.carryInCents > 0 {
+                    sub.addItem(Self.disabledItem("  Subtracted (before this month): \(UsageMath.formatDollars(e.carryInCents))"))
+                }
+                if e.completedCents > 0 {
+                    sub.addItem(Self.disabledItem("  From cycles closed this month: \(UsageMath.formatDollars(e.completedCents))"))
+                }
+                if let reset = e.cycleResetsAt {
+                    sub.addItem(Self.disabledItem("  Provider cycle resets: \(UsageMath.formatResetTime(reset))"))
+                } else {
+                    sub.addItem(Self.disabledItem("  No reset time from provider (drop-detected)"))
+                }
+                sub.addItem(Self.disabledItem("  Last sample: \(UsageMath.formatAgoShort(since: e.lastSampleAt)) ago"))
+                if e.isMonthUncertain {
+                    let reason = e.monthUncertainReason ?? "This month's figure may be inaccurate."
+                    sub.addItem(Self.disabledItem("  ⚠︎ \(reason)"))
+                }
+            } else {
+                sub.addItem(Self.disabledItem("  \(UsageMath.formatDollars(spend.usedCents)) (raw; not yet reconciled)"))
+            }
+            sub.addItem(.separator())
+        }
+        if !any { sub.addItem(Self.disabledItem("No spend reported yet")) }
+        root.submenu = sub
+        menu.addItem(root)
     }
 
     private func addFooter() {

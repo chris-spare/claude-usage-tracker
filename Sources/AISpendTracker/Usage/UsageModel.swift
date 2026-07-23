@@ -47,14 +47,30 @@ struct UsageWindow: Codable, Equatable {
     }
 }
 
-/// A provider's month-to-date overage / pay-as-you-go spend, in cents. All enabled
-/// providers' `usedCents` are summed into the single combined spend pie.
-/// `apiLimitCents` is the provider-reported cap (informational only — the spend pie
-/// fills against the user's own spend total). `label` names the source in the menu.
+/// A provider's spend as the provider *itself* reports it — a raw month-to-date figure
+/// measured against the provider's OWN billing cycle, in cents. This is an untranslated
+/// reading, not yet aligned to the user's calendar month; `SpendLedger` reconstructs
+/// the calendar-month total from a stream of these. `apiLimitCents` is the
+/// provider-reported cap (informational only). `label` names the source in the menu.
+///
+/// `cycleResetsAt` is the provider's own next cycle-reset instant, when the API tells
+/// us (Codex `individual_limit.reset_at`, Cursor `billingCycleEnd`). It is the ledger's
+/// authoritative reset signal: when it changes, the provider's counter has rolled over.
+/// It is **nil when the provider exposes no reset timestamp** (Claude) — the ledger then
+/// falls back to detecting a reset from a drop in `usedCents`, which is less reliable
+/// (see `SpendLedger`).
 struct SpendInfo: Codable, Equatable {
     var usedCents: Double
     var apiLimitCents: Double?
     var label: String
+    var cycleResetsAt: Date?
+
+    init(usedCents: Double, apiLimitCents: Double?, label: String, cycleResetsAt: Date? = nil) {
+        self.usedCents = usedCents
+        self.apiLimitCents = apiLimitCents
+        self.label = label
+        self.cycleResetsAt = cycleResetsAt
+    }
 }
 
 /// What every provider returns from a successful fetch: an ordered list of windows

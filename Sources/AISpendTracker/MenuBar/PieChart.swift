@@ -30,7 +30,7 @@ enum PieChart {
     }
     /// Combined spend pie: a green usage ring (#34C759 — matched in perceived brightness
     /// to the brand colors) over a 50%-dimmed green time wedge, with a white maxed-out
-    /// ring. A plain provider-style ring; the dollar figure still tints by pace elsewhere.
+    /// ring. A plain provider-style palette; the dollar figure is drawn in the same green.
     static let spendPalette = make(52, 199, 89)
 
     /// Claude's per-model scoped windows (e.g. "Fable 7-Day") render golden-amber so
@@ -186,38 +186,23 @@ enum PieChart {
         }
         if includeSpend && vm.hasAnySpend {
             let at = vm.latestUpdate ?? now
-            let status = UsageMath.spendStatus(usedCents: vm.combinedSpendCents,
-                                               limitCents: vm.customLimitCents,
-                                               timeFraction: UsageMath.monthTimeFraction(now: at))
             out.append(Circle(
                 kind: .pie(time: UsageMath.monthTimeFraction(now: at),
                            usage: UsageMath.spendFraction(usedCents: vm.combinedSpendCents,
                                                           limitCents: vm.customLimitCents)),
                 heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Spend",
-                // The ring is always the spend palette's green — a standard provider-style
-                // ring, no pace tint. The heading text rides the menu background so its
-                // neutral is the adaptive label color.
+                // A standard provider-style pie: green ring, green heading text, no pace
+                // tint — matching how every other provider column is colored.
                 usageColor: spendPalette.usage,
                 timeColor: spendPalette.time,
                 overColor: spendPalette.over,
-                headingColor: spendStatusColor(status, neutral: .labelColor),
+                headingColor: spendPalette.usage,
                 spark: vm.spendSeries,
                 resetsAt: UsageMath.monthResetDate(now: now),
                 lastUpdated: vm.latestUpdate,
                 sparkTooltip: UsageMath.recentPeakText(vm.spendSeries, unit: .dollars)))
         }
         return out
-    }
-
-    /// The pace color for a spend status — the shared mapping behind the spend ring,
-    /// the dropdown heading, and the menu-bar text so they never drift: warm → orange,
-    /// over → red, and on-pace → the caller's context-appropriate `neutral`.
-    static func spendStatusColor(_ status: UsageMath.SpendStatus, neutral: NSColor) -> NSColor {
-        switch status {
-        case .ok:      return neutral
-        case .warning: return .systemOrange
-        case .over:    return .systemRed
-        }
     }
 
     /// Compose the circles into one status-item image. `outline` is the hairline color

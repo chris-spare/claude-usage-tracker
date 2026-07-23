@@ -51,7 +51,7 @@ final class UsageStore {
 }
 
 /// How the combined spend is shown in the menu bar: as the pie ring (default), as a
-/// pace-colored dollar figure, or not at all. Only governs the tray glyph — the
+/// green dollar figure, or not at all. Only governs the tray glyph — the
 /// dropdown always keeps the rich spend ring.
 enum SpendDisplayMode: String, CaseIterable {
     case circle, text, off
@@ -69,7 +69,7 @@ enum Settings {
 
     /// The dollar total (in cents) the combined spend pie fills against. May be 0,
     /// which turns the spend ring into a plain "any spend at all" indicator (empty at
-    /// $0, full above) — see `UsageMath.spendFraction` / `spendStatus`.
+    /// $0, full above) — see `UsageMath.spendFraction`.
     static var customLimitCents: Double {
         get { UserDefaults.standard.object(forKey: customLimitKey) as? Double ?? defaultCustomLimitCents }
         set { UserDefaults.standard.set(newValue, forKey: customLimitKey) }

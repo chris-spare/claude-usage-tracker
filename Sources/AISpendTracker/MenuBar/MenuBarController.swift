@@ -118,13 +118,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     /// Repaint the tray icon from the current view model. The provider pies are always
     /// drawn as the button image; combined spend follows `spendDisplayMode` — a pie in
-    /// the image (`.circle`), a pace-colored dollar title beside it (`.text`), or
+    /// the image (`.circle`), a green dollar title beside it (`.text`), or
     /// nothing (`.off`).
     private func redraw(now: Date) {
         guard let button = statusItem.button else { return }
         let isDark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let circles = PieChart.circles(from: vm, now: now, includeSpend: vm.spendDisplayMode == .circle)
-        let title = spendTitle(now: now, isDark: isDark)
+        let title = spendTitle()
 
         // Everything is composited into the single button image (pies, then the spend
         // text in `.text` mode), so we control the spacing exactly — a small left gap
@@ -171,24 +171,18 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                                    y: (height - textSize.height) / 2))
             return true
         }
-        image.isTemplate = false   // keep the pace color, not a monochrome template
+        image.isTemplate = false   // keep the real colors, not a monochrome template
         return image
     }
 
-    /// The combined-spend dollar figure for the menu bar, colored by pace, or nil when
-    /// spend isn't shown as text (or there's no spend yet). Neutral is adaptive — white
-    /// on a dark bar, dark on a light one — so it stays legible either way.
-    private func spendTitle(now: Date, isDark: Bool) -> NSAttributedString? {
+    /// The combined-spend dollar figure for the menu bar, or nil when spend isn't shown
+    /// as text (or there's no spend yet). Colored in the spend palette's green to match
+    /// the spend ring and its dropdown heading.
+    private func spendTitle() -> NSAttributedString? {
         guard vm.spendDisplayMode == .text, vm.hasAnySpend else { return nil }
-        let cents = vm.combinedSpendCents
-        let timeFraction = UsageMath.monthTimeFraction(now: vm.latestUpdate ?? now)
-        let status = UsageMath.spendStatus(usedCents: cents, limitCents: vm.customLimitCents, timeFraction: timeFraction)
-        // Neutral adapts to the bar (white on dark, dark on light); the alert tints are
-        // shared with the dropdown spend column via PieChart.spendStatusColor.
-        let color = PieChart.spendStatusColor(status, neutral: NSColor(white: isDark ? 1 : 0, alpha: 1))
-        return NSAttributedString(string: UsageMath.formatDollarsRounded(cents), attributes: [
+        return NSAttributedString(string: UsageMath.formatDollarsRounded(vm.combinedSpendCents), attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
-            .foregroundColor: color])
+            .foregroundColor: PieChart.spendPalette.usage])
     }
 
     // Refresh countdowns/ago against the live clock each time the menu opens.

@@ -108,24 +108,6 @@ final class UsageMathTests: XCTestCase {
         XCTAssertEqual(UsageMath.spendFraction(usedCents: 100, limitCents: 0), 1)
     }
 
-    func testSpendStatus() {
-        // Positive budget: compare spend pace against elapsed month.
-        // spend 40% vs time 60% → ratio 0.67 → ok.
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 40, limitCents: 100, timeFraction: 0.6), .ok)
-        // spend 50% vs time 60% → ratio 0.83 → warning.
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 50, limitCents: 100, timeFraction: 0.6), .warning)
-        // spend 70% vs time 60% → ratio 1.17 → over.
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 70, limitCents: 100, timeFraction: 0.6), .over)
-        // Exactly on pace (ratio 1.0) is not yet over.
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 60, limitCents: 100, timeFraction: 0.6), .warning)
-        // Start of month (no time elapsed): any spend outpaces time.
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 1, limitCents: 100, timeFraction: 0), .over)
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 0, limitCents: 100, timeFraction: 0), .ok)
-        // No budget: any spend at all is over; $0 is ok.
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 0, limitCents: 0, timeFraction: 0.5), .ok)
-        XCTAssertEqual(UsageMath.spendStatus(usedCents: 1, limitCents: 0, timeFraction: 0.5), .over)
-    }
-
     func testUsageRatePoints() {
         let t = Date(timeIntervalSince1970: 1_700_000_000)
         let samples: [(Date, Double)] = [

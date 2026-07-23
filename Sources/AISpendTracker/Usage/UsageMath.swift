@@ -96,23 +96,6 @@ enum UsageMath {
         return max(0, usedCents / limitCents)
     }
 
-    /// Whether spending is on pace, running warm, or over — driving the pace-colored
-    /// spend text (neutral / amber / red). With a positive budget it compares the
-    /// spend fraction against how much of the month has elapsed (`timeFraction`):
-    /// over when spend % exceeds time %, warm when spend is past 80% of the time pace.
-    /// With a $0 budget there's no pace to measure, so any spend at all reads as over.
-    enum SpendStatus { case ok, warning, over }
-
-    static func spendStatus(usedCents: Double, limitCents: Double, timeFraction: Double) -> SpendStatus {
-        guard limitCents > 0 else { return usedCents > 0 ? .over : .ok }
-        let spendFrac = usedCents / limitCents
-        guard timeFraction > 0 else { return spendFrac > 0 ? .over : .ok }
-        let ratio = spendFrac / timeFraction
-        if ratio > 1.0 { return .over }
-        if ratio > 0.8 { return .warning }
-        return .ok
-    }
-
     /// Highest per-minute consumption rate across a cumulative series, and when it
     /// occurred. Each interval's rate is the (non-negative) rise divided by the
     /// actual minutes between those two samples — so it's correct even if sampling

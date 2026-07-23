@@ -63,6 +63,59 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         redraw(now: Date())
     }
 
+    // MARK: - Menu-bar visibility
+
+    /// Guards the heads-up to once per launch (the user asked for one-time-per-startup).
+    private var hasWarnedNotDisplayed = false
+
+    /// macOS silently drops status items that don't fit — common on notched Macs and
+    /// crowded menu bars. The button still exists, but its window is parked off-screen.
+    /// If it looks like we didn't get a slot, show a one-time (per launch) heads-up
+    /// pointing at a menu-bar organizer. Runs on a delay so AppKit has laid out the bar
+    /// and the window server has run a display pass before we judge; re-checks once more
+    /// before alerting, since layout can still be settling right after launch.
+    func warnIfNotDisplayed() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, !self.hasWarnedNotDisplayed, !self.statusItemAppearsOnScreen() else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, !self.hasWarnedNotDisplayed, !self.statusItemAppearsOnScreen() else { return }
+                self.hasWarnedNotDisplayed = true
+                self.showNotDisplayedAlert()
+            }
+        }
+    }
+
+    /// Best-effort check that our menu-bar item actually got a slot in a menu bar. A
+    /// placed item's button window sits within some screen's frame; a dropped one is
+    /// parked off every screen. We decide purely on that intersection (very low chance
+    /// of a false "hidden"); occlusion/screen are logged only to diagnose the real case.
+    private func statusItemAppearsOnScreen() -> Bool {
+        guard statusItem.isVisible, let window = statusItem.button?.window else {
+            Log.log("visibility: no status-item button window — treating as not displayed")
+            return false
+        }
+        let frame = window.frame
+        let onScreen = NSScreen.screens.contains { $0.frame.intersects(frame) }
+        let occludedVisible = window.occlusionState.contains(.visible)
+        Log.log("visibility: frame=\(frame) onScreen=\(onScreen) hasScreen=\(window.screen != nil) occlusionVisible=\(occludedVisible)")
+        return onScreen
+    }
+
+    private func showNotDisplayedAlert() {
+        Log.log("visibility: menu-bar item appears hidden — showing heads-up")
+        let alert = NSAlert()
+        alert.messageText = "AI Spend Tracker may be hidden"
+        alert.informativeText = "The app is running, but there wasn't enough room in your menu bar to "
+            + "show its icon — common on Macs with a notch or a crowded menu bar.\n\n"
+            + "A free menu-bar organizer like Ice can reveal hidden icons and give them room."
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Get Ice…")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn, let url = URL(string: "https://icemenubar.app") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Repaint the tray icon from the current view model. The provider pies are always
     /// drawn as the button image; combined spend follows `spendDisplayMode` — a pie in
     /// the image (`.circle`), a pace-colored dollar title beside it (`.text`), or

@@ -40,6 +40,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate {
             startProvider(id)
         }
         render()
+
+        // If the menu bar had no room for our icon, let the user know (once per launch)
+        // and point them at a menu-bar organizer, so it doesn't look like a silent crash.
+        menuBar.warnIfNotDisplayed()
     }
 
     // MARK: - Provider lifecycle

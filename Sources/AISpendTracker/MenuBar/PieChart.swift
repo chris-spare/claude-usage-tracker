@@ -11,10 +11,13 @@ import AppKit
 ///   3. the "usage" layer as a ring [0 … usage] in the outer lane, over the wedge,
 ///   4. a thin hairline outline.
 /// Colors come from the per-provider palette (usage ring + darkened time wedge);
-/// the spend pie uses a red ring over a dimmed-red wedge.
+/// the spend pie uses a green ring over a dimmed-green wedge.
 enum PieChart {
-    /// A provider's (or the spend pie's) two colors.
-    struct Palette { let usage: NSColor; let time: NSColor }
+    /// A provider's (or the spend pie's) colors: the bright usage ring, the dim time
+    /// wedge, and the `over` mark drawn as a full outer ring at ≥100%. `over` is white
+    /// for every palette; keeping it in the struct is the single source of truth for the
+    /// maxed-out color — the draw code never infers it from the ring color.
+    struct Palette { let usage: NSColor; let time: NSColor; let over: NSColor }
 
     /// Per-provider palette: usage ring in the brand color, time wedge at 50%
     /// brightness. Claude #D97757, Codex #3D93D6, Cursor #AC7CE0.
@@ -25,10 +28,10 @@ enum PieChart {
         case .cursor: return make(172, 124, 224)
         }
     }
-    /// Combined spend pie: a red usage ring (#F04C4C, near the brand colors' perceived
-    /// lightness) over a neutral gray time wedge.
-    static let spendPalette = Palette(usage: NSColor(srgbRed: 240 / 255, green: 76 / 255, blue: 76 / 255, alpha: 1),
-                                      time: NSColor(white: 0.5, alpha: 1))
+    /// Combined spend pie: a green usage ring (#34C759 — matched in perceived brightness
+    /// to the brand colors) over a 50%-dimmed green time wedge, with a white maxed-out
+    /// ring. A plain provider-style ring; the dollar figure still tints by pace elsewhere.
+    static let spendPalette = make(52, 199, 89)
 
     /// Claude's per-model scoped windows (e.g. "Fable 7-Day") render golden-amber so
     /// they read as distinct from the primary 5-hour/7-day windows, which keep Claude's
@@ -38,7 +41,8 @@ enum PieChart {
 
     private static func make(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> Palette {
         Palette(usage: NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1),
-                time: NSColor(srgbRed: r / 255 * 0.5, green: g / 255 * 0.5, blue: b / 255 * 0.5, alpha: 1))
+                time: NSColor(srgbRed: r / 255 * 0.5, green: g / 255 * 0.5, blue: b / 255 * 0.5, alpha: 1),
+                over: .white)
     }
 
     // Untouched remainder — black.
@@ -68,9 +72,10 @@ enum PieChart {
     /// Inner edge of the usage ring, as a fraction of the pie radius (so the ring band
     /// is the outer 1/3 of the radius).
     static let ringInnerRatio: CGFloat = 0.67
-    /// Radius of the white "maxed out" center dot (drawn at 100%), as a fraction of the
-    /// pie radius.
-    static let fullDotRatio: CGFloat = 0.13
+    /// Width of the bright "maxed out" ring (drawn at 100% around the very outside of
+    /// the pie), as a fraction of the pie radius. Kept well under the usage lane's 1/3
+    /// so the usage color still shows through inside it.
+    static let fullRingWidthRatio: CGFloat = 1.0 / 16.0
 
     static func size(circles: Int) -> NSSize {
         let n = max(1, circles)   // always at least one slot so the tray item is clickable
@@ -97,6 +102,9 @@ enum PieChart {
         var caption: String
         var usageColor: NSColor
         var timeColor: NSColor
+        /// Color of the "maxed out" ring drawn around the outside at ≥100% usage. Comes
+        /// straight from the palette (white for every pie) — never derived from `usageColor`.
+        var overColor: NSColor
         /// Color for the heading text in the dropdown header. Usually the usage color
         /// (ties the column to its ring), but the spend column diverges: its ring sits
         /// on a black disc (neutral = white) while the heading sits on the menu
@@ -118,7 +126,8 @@ enum PieChart {
         var sparkTooltip: String?
 
         init(kind: Kind, rawResponse: String? = nil, heading: String? = nil, caption: String,
-             usageColor: NSColor, timeColor: NSColor, headingColor: NSColor? = nil,
+             usageColor: NSColor, timeColor: NSColor, overColor: NSColor = .white,
+             headingColor: NSColor? = nil,
              spark: [(Date, Double)] = [],
              resetsAt: Date? = nil, lastUpdated: Date? = nil,
              pieTooltip: String? = nil, sparkTooltip: String? = nil) {
@@ -128,6 +137,7 @@ enum PieChart {
             self.caption = caption
             self.usageColor = usageColor
             self.timeColor = timeColor
+            self.overColor = overColor
             self.headingColor = headingColor ?? usageColor
             self.spark = spark
             self.resetsAt = resetsAt
@@ -165,7 +175,7 @@ enum PieChart {
                         kind: .pie(time: UsageMath.timeFraction(w.timeBasis, resetsAt: w.resetsAt, now: at),
                                    usage: UsageMath.usageFraction(utilization: w.utilization)),
                         rawResponse: p.lastRawResponse, heading: p.displayName, caption: w.caption,
-                        usageColor: wpal.usage, timeColor: wpal.time,
+                        usageColor: wpal.usage, timeColor: wpal.time, overColor: wpal.over,
                         spark: series,
                         resetsAt: w.resetsAt,
                         lastUpdated: p.lastUpdated,
@@ -184,10 +194,12 @@ enum PieChart {
                            usage: UsageMath.spendFraction(usedCents: vm.combinedSpendCents,
                                                           limitCents: vm.customLimitCents)),
                 heading: UsageMath.formatDollars(vm.combinedSpendCents), caption: "Spend",
-                // The ring rides a black disc so its neutral is white; the heading text
-                // rides the menu background so its neutral is the adaptive label color.
-                usageColor: spendStatusColor(status, neutral: .white),
+                // The ring is always the spend palette's green — a standard provider-style
+                // ring, no pace tint. The heading text rides the menu background so its
+                // neutral is the adaptive label color.
+                usageColor: spendPalette.usage,
                 timeColor: spendPalette.time,
+                overColor: spendPalette.over,
                 headingColor: spendStatusColor(status, neutral: .labelColor),
                 spark: vm.spendSeries,
                 resetsAt: UsageMath.monthResetDate(now: now),
@@ -240,7 +252,8 @@ enum PieChart {
         switch circle.kind {
         case .pie(let time, let usage):
             drawPie(time: time, usage: usage, in: rect, timeColor: circle.timeColor,
-                    usageColor: circle.usageColor, bordered: bordered, outline: outline)
+                    usageColor: circle.usageColor, overColor: circle.overColor,
+                    bordered: bordered, outline: outline)
         case .error:
             drawErrorIcon(in: rect, color: circle.usageColor)
         }
@@ -269,8 +282,8 @@ enum PieChart {
     /// Draw one circle from already-computed fractions. Exposed for previews/tests.
     /// `bordered` leaves a black rim inside the disc (menu only).
     static func drawPie(time: Double, usage: Double, in rect: NSRect,
-                        timeColor: NSColor, usageColor: NSColor, bordered: Bool = true,
-                        outline: NSColor = Self.outline) {
+                        timeColor: NSColor, usageColor: NSColor, overColor: NSColor = .white,
+                        bordered: Bool = true, outline: NSColor = Self.outline) {
         let inset = outlineWidth / 2 + 0.25
         let rOuter = min(rect.width, rect.height) / 2 - inset
         let center = NSPoint(x: rect.midX, y: rect.midY)
@@ -301,13 +314,14 @@ enum PieChart {
 
         strokeOutline(center: center, radius: r, color: outline)
 
-        // At ≥100% the ring is full; add a small white center dot as a subtle "maxed"
-        // flag. Applies to every pie, spend included.
+        // At ≥100% the ring is full; overlay a bright full ring around the very outside
+        // as a "maxed" flag, sitting inside the outer 1/3 usage lane so the usage color
+        // still shows through beneath it. Applies to every pie, spend included. The mark
+        // color comes from the palette (white), never inferred from the ring color.
         if usage >= 1 {
-            let dotR = r * fullDotRatio
-            NSColor.white.setFill()
-            NSBezierPath(ovalIn: NSRect(x: center.x - dotR, y: center.y - dotR,
-                                        width: 2 * dotR, height: 2 * dotR)).fill()
+            let width = r * fullRingWidthRatio
+            fillRingWedge(center: center, innerRadius: r - width, outerRadius: r,
+                          from: 0, to: 1, color: overColor)
         }
     }
 

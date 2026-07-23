@@ -36,7 +36,7 @@ enum DebugRender {
                 let y = height - 80 - CGFloat(row + 1) * (cell + labelH) + labelH
                 let pieRect = NSRect(x: x + (cell - pieD) / 2, y: y, width: pieD, height: pieD)
                 let pal = PieChart.palette(for: .claude)
-                PieChart.drawPie(time: c.1, usage: c.2, in: pieRect, timeColor: pal.time, usageColor: pal.usage)
+                PieChart.drawPie(time: c.1, usage: c.2, in: pieRect, timeColor: pal.time, usageColor: pal.usage, overColor: pal.over)
                 drawLabel(c.0, centeredIn: NSRect(x: x, y: y - labelH, width: cell, height: labelH))
             }
 
